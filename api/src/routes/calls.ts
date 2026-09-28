@@ -25,7 +25,7 @@ callsRouter.post("/", async (req, res) => {
     occupation: string | null;
     address: string | null;
     risk_tier: string;
-  }>("select id, full_name, phone_e164, employer, occupation, address, risk_tier from customers where id = $1", [customer_id]);
+  }>("select id, full_name, phone_e164, employer, occupation, address, risk_tier from kyc_customers where id = $1", [customer_id]);
   if (!customer) {
     res.status(404).json({ error: "customer not found" });
     return;

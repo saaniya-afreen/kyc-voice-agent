@@ -65,13 +65,13 @@ export async function runClassification(kycRefreshId: string, input: Record<stri
     occupation: string | null;
     address: string | null;
     phone_e164: string | null;
-  }>("select id, risk_tier, employer, occupation, address, phone_e164 from customers where id = $1", [refresh.customer_id]);
+  }>("select id, risk_tier, employer, occupation, address, phone_e164 from kyc_customers where id = $1", [refresh.customer_id]);
   if (!customer) return { status: 404, body: { error: "customer not found" } };
 
   if (payload.activity_status === "dormant") {
     const nextReviewDate = addYears(reviewYearsForRiskTier(customer.risk_tier));
     await pool.query(
-      "update customers set activity_status = 'dormant', kyc_status = 'completed', next_review_date = $2 where id = $1",
+      "update kyc_customers set activity_status = 'dormant', kyc_status = 'completed', next_review_date = $2 where id = $1",
       [customer.id, nextReviewDate]
     );
     await pool.query("update kyc_refresh set call_status = 'completed', outcome_code = 'UC-1.3' where id = $1", [refresh.id]);
@@ -98,7 +98,7 @@ export async function runClassification(kycRefreshId: string, input: Record<stri
     const setClauses = Object.keys(diff).map((k, i) => `${k} = $${i + 3}`);
     const setValues = Object.values(diff).map((v) => v.new);
     await pool.query(
-      `update customers set kyc_status = 'completed', next_review_date = $2 ${setClauses.length ? "," + setClauses.join(", ") : ""} where id = $1`,
+      `update kyc_customers set kyc_status = 'completed', next_review_date = $2 ${setClauses.length ? "," + setClauses.join(", ") : ""} where id = $1`,
       [customer.id, nextReviewDate, ...setValues]
     );
 
@@ -123,7 +123,7 @@ export async function runClassification(kycRefreshId: string, input: Record<stri
   }
 
   const tinExceptionRows = await pool.query(
-    "select 1 from customer_tins where kyc_refresh_id = $1 and is_available = false limit 1",
+    "select 1 from kyc_customer_tins where kyc_refresh_id = $1 and is_available = false limit 1",
     [refresh.id]
   );
   const uc2 = classifyUc2(payload, tinExceptionRows.rowCount! > 0);
@@ -134,7 +134,7 @@ export async function runClassification(kycRefreshId: string, input: Record<stri
   }
 
   const caseResult = await pool.query<{ id: string }>(
-    `insert into compliance_cases (customer_id, kyc_refresh_id, escalation_reason, material_change_type, required_documents, ssn_encrypted)
+    `insert into kyc_compliance_cases (customer_id, kyc_refresh_id, escalation_reason, material_change_type, required_documents, ssn_encrypted)
      values ($1, $2, $3, $4, $5, $6) returning id`,
     [
       customer.id,
@@ -146,7 +146,7 @@ export async function runClassification(kycRefreshId: string, input: Record<stri
     ]
   );
 
-  await pool.query("update customers set kyc_status = 'escalated' where id = $1", [customer.id]);
+  await pool.query("update kyc_customers set kyc_status = 'escalated' where id = $1", [customer.id]);
   await pool.query(
     "update kyc_refresh set call_status = 'escalated', outcome_code = $2, consent_given = true where id = $1",
     [refresh.id, uc2.outcome_code]
@@ -187,9 +187,9 @@ async function handleTerminalReason(
   }
 
   await pool.query("update kyc_refresh set call_status = 'declined', outcome_code = 'UC-D3' where id = $1", [kycRefreshId]);
-  await pool.query("update customers set kyc_status = 'escalated' where id = $1", [customerId]);
+  await pool.query("update kyc_customers set kyc_status = 'escalated' where id = $1", [customerId]);
   const caseResult = await pool.query<{ id: string }>(
-    `insert into compliance_cases (customer_id, kyc_refresh_id, escalation_reason, required_documents)
+    `insert into kyc_compliance_cases (customer_id, kyc_refresh_id, escalation_reason, required_documents)
      values ($1, $2, $3, '{}') returning id`,
     [customerId, kycRefreshId, "Customer declined to make the required regulatory declaration"]
   );

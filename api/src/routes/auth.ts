@@ -14,7 +14,7 @@ authRouter.post("/login", async (req, res) => {
   }
 
   const officer = await queryOne<{ id: string; email: string; password_hash: string; name: string | null }>(
-    "select id, email, password_hash, name from officers where email = $1",
+    "select id, email, password_hash, name from kyc_officers where email = $1",
     [String(email).toLowerCase()]
   );
 
@@ -29,7 +29,7 @@ authRouter.post("/login", async (req, res) => {
 
 authRouter.get("/me", requireOfficer, async (req, res) => {
   const officer = await queryOne<{ id: string; email: string; name: string | null }>(
-    "select id, email, name from officers where id = $1",
+    "select id, email, name from kyc_officers where id = $1",
     [req.officer!.sub]
   );
   if (!officer) {

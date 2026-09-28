@@ -29,7 +29,7 @@ customersRouter.get("/", async (req, res) => {
   const { rows } = await pool.query(
     `select c.*,
             r.id as refresh_id, r.contact_attempts, r.max_attempts, r.call_status, r.outcome_code, r.created_at as refresh_created_at
-     from customers c
+     from kyc_customers c
      left join lateral (
        select * from kyc_refresh where customer_id = c.id order by created_at desc limit 1
      ) r on true
@@ -73,7 +73,7 @@ customersRouter.get("/", async (req, res) => {
 customersRouter.get("/:id", async (req, res) => {
   const { id } = req.params;
 
-  const customer = await queryOne("select * from customers where id = $1", [id]);
+  const customer = await queryOne("select * from kyc_customers where id = $1", [id]);
   if (!customer) {
     res.status(404).json({ error: "customer not found" });
     return;
@@ -82,9 +82,9 @@ customersRouter.get("/:id", async (req, res) => {
   const refreshes = await pool.query("select * from kyc_refresh where customer_id = $1 order by created_at desc", [id]);
   const latestRefreshId = refreshes.rows[0]?.id ?? null;
   const tins = latestRefreshId
-    ? (await pool.query("select * from customer_tins where kyc_refresh_id = $1", [latestRefreshId])).rows
+    ? (await pool.query("select * from kyc_customer_tins where kyc_refresh_id = $1", [latestRefreshId])).rows
     : [];
-  const auditLogs = await pool.query("select * from audit_logs where customer_id = $1 order by created_at desc", [id]);
+  const auditLogs = await pool.query("select * from kyc_audit_logs where customer_id = $1 order by created_at desc", [id]);
 
   res.json({ ...customer, refreshes: refreshes.rows, tins, audit_logs: auditLogs.rows });
 });

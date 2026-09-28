@@ -10,7 +10,7 @@ export async function logAudit(entry: {
 }): Promise<void> {
   try {
     await pool.query(
-      `insert into audit_logs (customer_id, kyc_refresh_id, event_type, actor, old_data, new_data)
+      `insert into kyc_audit_logs (customer_id, kyc_refresh_id, event_type, actor, old_data, new_data)
        values ($1, $2, $3, $4, $5, $6)`,
       [
         entry.customer_id ?? null,

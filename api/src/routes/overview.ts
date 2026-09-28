@@ -24,19 +24,19 @@ overviewRouter.get("/", async (_req, res) => {
     escalated,
     exceptions,
   ] = await Promise.all([
-    count("select count(*) from customers"),
-    count("select count(*) from customers where kyc_status = 'due'"),
+    count("select count(*) from kyc_customers"),
+    count("select count(*) from kyc_customers where kyc_status = 'due'"),
     count("select count(*) from kyc_refresh where call_status = 'calling'"),
     count("select count(*) from kyc_refresh where outcome_code in ('UC-1.1','UC-1.2','UC-1.3')"),
-    count("select count(*) from compliance_cases where case_status = 'pending_review'"),
+    count("select count(*) from kyc_compliance_cases where case_status = 'pending_review'"),
     count("select count(*) from kyc_refresh where contact_attempts > 0"),
     count("select count(*) from kyc_refresh where auth_attempts > 0"),
     count("select count(*) from kyc_refresh where call_status = 'completed'"),
     count("select count(*) from kyc_refresh where call_status = 'escalated'"),
     pool.query(
       `select cc.*, row_to_json(c.*) as customer
-       from compliance_cases cc
-       join customers c on c.id = cc.customer_id
+       from kyc_compliance_cases cc
+       join kyc_customers c on c.id = cc.customer_id
        where cc.case_status = 'pending_review'
        order by cc.created_at desc
        limit 5`

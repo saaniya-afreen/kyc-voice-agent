@@ -32,7 +32,7 @@ toolsRouter.post("/verify-account", async (req, res) => {
   }
 
   const customer = await queryOne<{ id: string; full_name: string; account_number: string; date_of_birth: string }>(
-    "select id, full_name, account_number, date_of_birth::text as date_of_birth from customers where id = $1",
+    "select id, full_name, account_number, date_of_birth::text as date_of_birth from kyc_customers where id = $1",
     [refresh.customer_id]
   );
   if (!customer) {
@@ -84,7 +84,7 @@ toolsRouter.post("/uc2-get-next-crs-country", async (req, res) => {
   }
 
   const recorded = await pool.query<{ country_code: string }>(
-    "select country_code from customer_tins where kyc_refresh_id = $1",
+    "select country_code from kyc_customer_tins where kyc_refresh_id = $1",
     [kyc_refresh_id]
   );
   const done = new Set(recorded.rows.map((r) => r.country_code.toUpperCase()));
@@ -115,7 +115,7 @@ toolsRouter.post("/uc2-store-tin-value", async (req, res) => {
   }
 
   await pool.query(
-    `insert into customer_tins (customer_id, kyc_refresh_id, country_code, tin_value, is_available, reason_code, reason_explanation)
+    `insert into kyc_customer_tins (customer_id, kyc_refresh_id, country_code, tin_value, is_available, reason_code, reason_explanation)
      values ($1, $2, $3, $4, true, null, null)
      on conflict (kyc_refresh_id, country_code)
      do update set tin_value = excluded.tin_value, is_available = true, reason_code = null, reason_explanation = null`,
@@ -149,7 +149,7 @@ toolsRouter.post("/uc2-store-tin-reason", async (req, res) => {
   }
 
   await pool.query(
-    `insert into customer_tins (customer_id, kyc_refresh_id, country_code, tin_value, is_available, reason_code, reason_explanation)
+    `insert into kyc_customer_tins (customer_id, kyc_refresh_id, country_code, tin_value, is_available, reason_code, reason_explanation)
      values ($1, $2, $3, null, false, $4, $5)
      on conflict (kyc_refresh_id, country_code)
      do update set tin_value = null, is_available = false, reason_code = excluded.reason_code, reason_explanation = excluded.reason_explanation`,
