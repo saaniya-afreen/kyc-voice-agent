@@ -13,7 +13,18 @@ import { overviewRouter } from "./routes/overview.js";
 
 const app = express();
 app.use(cors({ origin: env.corsOrigin }));
-app.use(express.json({ limit: "2mb" }));
+// `type: () => true` parses the body as JSON regardless of Content-Type — some voice
+// platforms' custom-request senders don't set Content-Type: application/json, and
+// express.json() otherwise silently skips parsing (leaving req.body empty) instead
+// of erroring, which shows up downstream as a confusing "X is required" 400.
+app.use(express.json({ limit: "2mb", type: () => true }));
+app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof SyntaxError && "body" in err) {
+    res.status(400).json({ error: "invalid JSON body" });
+    return;
+  }
+  next(err);
+});
 
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
