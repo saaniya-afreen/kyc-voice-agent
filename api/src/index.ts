@@ -30,6 +30,19 @@ app.use((err: unknown, _req: express.Request, res: express.Response, next: expre
 
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
+// Render's free plan doesn't surface per-request logs, and diagnosing voice-platform
+// tool-call issues needs to see exactly what arrived and what we sent back — log every
+// request to console (captured in Render's app logs) rather than guessing blind.
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  res.on("finish", () => {
+    const body = req.body && typeof req.body === "object" ? { ...req.body } : req.body;
+    if (body && typeof body === "object" && "ssn" in body) body.ssn = "[redacted]";
+    console.log(`${req.method} ${req.originalUrl} -> ${res.statusCode} (${Date.now() - startedAt}ms) body=${JSON.stringify(body)}`);
+  });
+  next();
+});
+
 app.use("/v1/auth", authRouter);
 app.use("/v1/trigger-outbound-call", callsRouter);
 app.use("/v1/call-events", webhookRouter);
