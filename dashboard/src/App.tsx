@@ -9,9 +9,13 @@ import ComplianceQueue from "@/pages/ComplianceQueue";
 import CaseDetail from "@/pages/CaseDetail";
 import CustomerDetail from "@/pages/CustomerDetail";
 
+// VITE_AUTH_DISABLED matches the API's DASHBOARD_AUTH_DISABLED — set for throwaway
+// testing only. Never build with this on for a deployment holding real customer data.
+const AUTH_DISABLED = import.meta.env.VITE_AUTH_DISABLED === "true";
+
 function RequireAuth({ children }: { children: ReactNode }) {
   const location = useLocation();
-  if (!getToken()) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  if (!AUTH_DISABLED && !getToken()) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   return <>{children}</>;
 }
 

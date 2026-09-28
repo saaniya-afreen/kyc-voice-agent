@@ -30,8 +30,15 @@ export function requireWebhookSecret(req: Request, res: Response, next: NextFunc
   next();
 }
 
-// Dashboard-only routes: requires a valid officer JWT from POST /v1/auth/login.
+// Dashboard-only routes: requires a valid officer JWT from POST /v1/auth/login,
+// unless DASHBOARD_AUTH_DISABLED=true (see env.ts) — used only for throwaway testing.
 export function requireOfficer(req: Request, res: Response, next: NextFunction) {
+  if (env.dashboardAuthDisabled) {
+    req.officer = { sub: "public", email: "public" };
+    next();
+    return;
+  }
+
   const header = req.header("authorization");
   const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
   if (!token) {

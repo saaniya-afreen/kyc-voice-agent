@@ -18,4 +18,9 @@ export const env = {
   seedOfficerPassword: process.env.SEED_OFFICER_PASSWORD ?? "",
   seedDemoData: process.env.SEED_DEMO_DATA !== "false",
   corsOrigin: process.env.CORS_ORIGIN ?? "*",
+  // Drops the officer-login requirement on every dashboard-facing route (customers,
+  // compliance cases, overview, trigger-outbound-call) — anyone with the dashboard
+  // URL can read and act on this data. Off by default; only meant for throwaway
+  // testing, never for a deployment holding real customer data.
+  dashboardAuthDisabled: process.env.DASHBOARD_AUTH_DISABLED === "true",
 };
