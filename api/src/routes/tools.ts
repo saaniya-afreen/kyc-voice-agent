@@ -3,6 +3,7 @@ import { pool, queryOne } from "../db.js";
 import { logAudit } from "../lib/audit.js";
 import { runClassification } from "../lib/kycProcessor.js";
 import { requireToolSecret } from "../middleware/auth.js";
+import { coerceBool, coerceObject, coerceOptionalString, coerceStringArray } from "../lib/coerce.js";
 
 export const toolsRouter = Router();
 toolsRouter.use(requireToolSecret);
@@ -149,8 +150,9 @@ toolsRouter.post("/verify-account", async (req, res) => {
 // POST /v1/uc2-get-next-crs-country
 // Body: { kyc_refresh_id, tax_residencies[] } -> { next_country_code, is_finished, remaining_count }
 toolsRouter.post("/uc2-get-next-crs-country", async (req, res) => {
-  const { kyc_refresh_id, tax_residencies } = req.body ?? {};
-  if (!kyc_refresh_id || !Array.isArray(tax_residencies)) {
+  const { kyc_refresh_id } = req.body ?? {};
+  const tax_residencies = coerceStringArray(req.body?.tax_residencies);
+  if (!kyc_refresh_id) {
     res.status(400).json({ error: "kyc_refresh_id and tax_residencies[] are required" });
     return;
   }
@@ -160,9 +162,7 @@ toolsRouter.post("/uc2-get-next-crs-country", async (req, res) => {
     [kyc_refresh_id]
   );
   const done = new Set(recorded.rows.map((r) => r.country_code.toUpperCase()));
-  const remaining = (tax_residencies as string[])
-    .map((c) => c.toUpperCase())
-    .filter((c) => c !== "AE" && !done.has(c));
+  const remaining = tax_residencies.map((c) => c.toUpperCase()).filter((c) => c !== "AE" && !done.has(c));
 
   res.json({
     next_country_code: remaining[0] ?? null,
@@ -242,11 +242,30 @@ toolsRouter.post("/uc2-store-tin-reason", async (req, res) => {
 // POST /v1/submit-kyc-screening
 // Either { kyc_refresh_id, terminal_reason } or the full screening payload — see docs/architecture.md
 toolsRouter.post("/submit-kyc-screening", async (req, res) => {
-  const { kyc_refresh_id } = req.body ?? {};
+  const body = req.body ?? {};
+  const { kyc_refresh_id, terminal_reason } = body;
   if (!kyc_refresh_id) {
     res.status(400).json({ error: "kyc_refresh_id is required" });
     return;
   }
-  const result = await runClassification(kyc_refresh_id, req.body);
+
+  // Two call shapes share this endpoint: an early-exit { terminal_reason } needs no
+  // coercion; the full screening payload does, since some platforms only ever
+  // substitute template variables as quoted strings (see lib/coerce.ts).
+  const input = terminal_reason
+    ? body
+    : {
+        ...body,
+        is_resident_uae: coerceBool(body.is_resident_uae),
+        has_us_indicia: coerceBool(body.has_us_indicia),
+        declaration_confirmed: coerceBool(body.declaration_confirmed),
+        tax_residencies: coerceStringArray(body.tax_residencies),
+        profile_updates: coerceObject(body.profile_updates),
+        activity_status: coerceOptionalString(body.activity_status),
+        ssn: coerceOptionalString(body.ssn),
+        account_structure: coerceOptionalString(body.account_structure),
+      };
+
+  const result = await runClassification(kyc_refresh_id, input);
   res.status(result.status).json(result.body);
 });
