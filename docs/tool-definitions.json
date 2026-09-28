@@ -1,0 +1,125 @@
+{
+  "_readme": "Custom tools for the KYC Refresh voice agent. Each `url` is one of this project's Supabase edge functions — replace {{FUNCTION_BASE_URL}} with https://<your-project-ref>.supabase.co/functions/v1 (or wherever you deploy them) when you paste these into your agent platform. Shaped for Retell's custom-function tool format (type/name/url/parameters/speak_during_execution); for Vapi, move `parameters` under a top-level `function` object — the JSON schema itself doesn't change. `kyc_refresh_id` is handed to the agent as a dynamic variable at call start (see voice-agent-system-prompt.md) — pass it through on every tool call. Every one of these endpoints requires a static header `X-Tool-Secret: <your AGENT_TOOL_SECRET>` — most platforms let you set custom headers per tool; add it to each tool's config alongside its URL.",
+  "tools": [
+    {
+      "type": "custom",
+      "name": "verify_account",
+      "description": "Verifies the customer's identity against the last 4 digits of their account number and date of birth. Call this once per attempt during the 2FA step. Allows up to 3 attempts per call; after that the call must end.",
+      "url": "{{FUNCTION_BASE_URL}}/verify-account",
+      "speak_during_execution": false,
+      "speak_after_execution": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kyc_refresh_id": { "type": "string", "description": "The kyc_refresh_id dynamic variable for this call" },
+          "digit_number": { "type": "string", "description": "Last 4 digits of the account number, as spoken by the customer" },
+          "dob": { "type": "string", "description": "Date of birth the customer gave, normalized to YYYY-MM-DD" }
+        },
+        "required": ["kyc_refresh_id", "digit_number", "dob"]
+      }
+    },
+    {
+      "type": "custom",
+      "name": "get_next_crs_country",
+      "description": "Given the full list of foreign tax residencies the customer just declared, returns the next country to collect a TIN for (skipping ones already recorded this call) and whether TIN collection is finished.",
+      "url": "{{FUNCTION_BASE_URL}}/uc2-get-next-crs-country",
+      "speak_during_execution": false,
+      "speak_after_execution": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kyc_refresh_id": { "type": "string" },
+          "tax_residencies": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "ISO 3166-1 alpha-2 country codes the customer declared, UAE included or not"
+          }
+        },
+        "required": ["kyc_refresh_id", "tax_residencies"]
+      }
+    },
+    {
+      "type": "custom",
+      "name": "store_tin_value",
+      "description": "Saves a Tax Identification Number the customer provided for a specific country.",
+      "url": "{{FUNCTION_BASE_URL}}/uc2-store-tin-value",
+      "speak_during_execution": false,
+      "speak_after_execution": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kyc_refresh_id": { "type": "string" },
+          "country_code": { "type": "string", "description": "ISO 3166-1 alpha-2 country code" },
+          "tin_value": { "type": "string" }
+        },
+        "required": ["kyc_refresh_id", "country_code", "tin_value"]
+      }
+    },
+    {
+      "type": "custom",
+      "name": "store_tin_reason",
+      "description": "Records why a customer cannot provide a TIN for a country, using the OECD exception reason codes: A = the country does not issue TINs, B = the customer is unable to obtain one, C = not required under that country's domestic law.",
+      "url": "{{FUNCTION_BASE_URL}}/uc2-store-tin-reason",
+      "speak_during_execution": false,
+      "speak_after_execution": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kyc_refresh_id": { "type": "string" },
+          "country_code": { "type": "string" },
+          "reason_code": { "type": "string", "enum": ["A", "B", "C"] },
+          "reason_explanation": { "type": "string", "description": "Brief note on why, in the customer's own words" }
+        },
+        "required": ["kyc_refresh_id", "country_code", "reason_code"]
+      }
+    },
+    {
+      "type": "custom",
+      "name": "submit_kyc_screening",
+      "description": "Submits the fully collected screening answers for final classification once the customer has confirmed their declaration is true and complete. Returns whether the refresh auto-completed or was escalated to the compliance team — use the response to choose your closing line.",
+      "url": "{{FUNCTION_BASE_URL}}/retell-kyc-processor",
+      "speak_during_execution": false,
+      "speak_after_execution": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kyc_refresh_id": { "type": "string" },
+          "is_resident_uae": { "type": "boolean" },
+          "tax_residencies": { "type": "array", "items": { "type": "string" }, "description": "All declared tax residencies, ISO-2 codes, including AE if applicable" },
+          "has_us_indicia": { "type": "boolean", "description": "US citizen, green card holder, or born in the US" },
+          "ssn": { "type": "string", "description": "Only ask for and pass this if has_us_indicia is true" },
+          "account_structure": { "type": "string", "enum": ["single", "joint", "poa", "trust"] },
+          "activity_status": { "type": "string", "enum": ["active", "dormant"], "description": "Only set when the customer confirms the account is dormant" },
+          "profile_updates": {
+            "type": "object",
+            "description": "Only include fields the customer actually corrected",
+            "properties": {
+              "employer": { "type": "string" },
+              "occupation": { "type": "string" },
+              "address": { "type": "string" },
+              "phone_e164": { "type": "string" }
+            }
+          },
+          "declaration_confirmed": { "type": "boolean" }
+        },
+        "required": ["kyc_refresh_id", "is_resident_uae", "tax_residencies", "has_us_indicia", "account_structure", "declaration_confirmed"]
+      }
+    },
+    {
+      "type": "custom",
+      "name": "end_call_early",
+      "description": "Closes out the refresh cycle for a call that is ending before reaching submit_kyc_screening: the customer declined to give consent at the start, declined to make the required declaration, or declined to proceed for some other reason. Call this immediately before hanging up.",
+      "url": "{{FUNCTION_BASE_URL}}/retell-kyc-processor",
+      "speak_during_execution": false,
+      "speak_after_execution": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kyc_refresh_id": { "type": "string" },
+          "terminal_reason": { "type": "string", "enum": ["consent_denied", "declaration_denied", "general_decline"] }
+        },
+        "required": ["kyc_refresh_id", "terminal_reason"]
+      }
+    }
+  ]
+}
