@@ -3,7 +3,7 @@ import { pool, queryOne } from "../db.js";
 import { logAudit } from "../lib/audit.js";
 import { runClassification } from "../lib/kycProcessor.js";
 import { requireToolSecret } from "../middleware/auth.js";
-import { coerceBool, coerceObject, coerceOptionalString, coerceStringArray } from "../lib/coerce.js";
+import { coerceBool, coerceObject, coerceOptionalString, coerceStringArray, isValidUuid } from "../lib/coerce.js";
 
 export const toolsRouter = Router();
 toolsRouter.use(requireToolSecret);
@@ -90,6 +90,10 @@ toolsRouter.post("/verify-account", async (req, res) => {
     res.status(400).json({ error: "kyc_refresh_id, digit_number and dob are required" });
     return;
   }
+  if (!isValidUuid(kyc_refresh_id)) {
+    res.status(400).json({ error: `kyc_refresh_id is not a valid id: "${kyc_refresh_id}" — call start_kyc_call again and use the kyc_refresh_id it returns` });
+    return;
+  }
 
   const refresh = await queryOne<{ id: string; customer_id: string; auth_attempts: number; call_status: string }>(
     "select id, customer_id, auth_attempts, call_status from kyc_refresh where id = $1",
@@ -156,6 +160,10 @@ toolsRouter.post("/uc2-get-next-crs-country", async (req, res) => {
     res.status(400).json({ error: "kyc_refresh_id and tax_residencies[] are required" });
     return;
   }
+  if (!isValidUuid(kyc_refresh_id)) {
+    res.status(400).json({ error: `kyc_refresh_id is not a valid id: "${kyc_refresh_id}" — call start_kyc_call again and use the kyc_refresh_id it returns` });
+    return;
+  }
 
   const recorded = await pool.query<{ country_code: string }>(
     "select country_code from kyc_customer_tins where kyc_refresh_id = $1",
@@ -177,6 +185,10 @@ toolsRouter.post("/uc2-store-tin-value", async (req, res) => {
   const { kyc_refresh_id, country_code, tin_value } = req.body ?? {};
   if (!kyc_refresh_id || !country_code || !tin_value) {
     res.status(400).json({ error: "kyc_refresh_id, country_code and tin_value are required" });
+    return;
+  }
+  if (!isValidUuid(kyc_refresh_id)) {
+    res.status(400).json({ error: `kyc_refresh_id is not a valid id: "${kyc_refresh_id}" — call start_kyc_call again and use the kyc_refresh_id it returns` });
     return;
   }
 
@@ -213,6 +225,10 @@ toolsRouter.post("/uc2-store-tin-reason", async (req, res) => {
     res.status(400).json({ error: "kyc_refresh_id, country_code and reason_code (A|B|C) are required" });
     return;
   }
+  if (!isValidUuid(kyc_refresh_id)) {
+    res.status(400).json({ error: `kyc_refresh_id is not a valid id: "${kyc_refresh_id}" — call start_kyc_call again and use the kyc_refresh_id it returns` });
+    return;
+  }
 
   const refresh = await queryOne<{ customer_id: string }>("select customer_id from kyc_refresh where id = $1", [kyc_refresh_id]);
   if (!refresh) {
@@ -246,6 +262,10 @@ toolsRouter.post("/submit-kyc-screening", async (req, res) => {
   const { kyc_refresh_id, terminal_reason } = body;
   if (!kyc_refresh_id) {
     res.status(400).json({ error: "kyc_refresh_id is required" });
+    return;
+  }
+  if (!isValidUuid(kyc_refresh_id)) {
+    res.status(400).json({ error: `kyc_refresh_id is not a valid id: "${kyc_refresh_id}" — call start_kyc_call again and use the kyc_refresh_id it returns` });
     return;
   }
 

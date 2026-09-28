@@ -1,3 +1,4 @@
+import "express-async-errors"; // must load before any router — patches Express to forward async route errors to the error middleware instead of crashing the process on an unhandled rejection
 import express from "express";
 import cors from "cors";
 import { env } from "./env.js";

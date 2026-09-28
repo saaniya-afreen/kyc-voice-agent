@@ -45,3 +45,12 @@ export function coerceOptionalString(value: unknown): string | undefined {
   if (typeof value !== "string" || value.trim() === "") return undefined;
   return value;
 }
+
+// Every kyc_refresh_id lookup goes into a `uuid` column — a malformed value (e.g. a
+// voice platform sending the literal placeholder text "unknown" when its own
+// {{kyc_refresh_id}} variable never got populated) would otherwise reach Postgres as
+// an invalid uuid input error. Reject it here with a clear 400 instead.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function isValidUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_RE.test(value);
+}
