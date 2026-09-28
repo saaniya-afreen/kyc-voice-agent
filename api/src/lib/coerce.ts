@@ -57,6 +57,31 @@ export function isValidShortCode(value: unknown): value is string {
   return typeof value === "string" && SHORT_CODE_RE.test(value);
 }
 
+// A real test call showed the agent calling verify_account before the customer had
+// actually answered — sending "not provided" as a literal dob value. A plain non-empty
+// check lets that through as if it were a genuine wrong answer, silently burning one of
+// the customer's 3 real auth attempts for nothing. Reject obvious placeholder/filler
+// text instead of treating it as a real (if incorrect) answer — digit_number and dob
+// should always contain a digit in any real answer, in any format.
+const PLACEHOLDER_ANSWERS = new Set([
+  "not provided",
+  "not given",
+  "not yet provided",
+  "unknown",
+  "n/a",
+  "na",
+  "none",
+  "null",
+  "pending",
+  "tbd",
+]);
+export function isRealAnswer(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed || PLACEHOLDER_ANSWERS.has(trimmed)) return false;
+  return /\d/.test(trimmed);
+}
+
 // verify-account compares the customer's date of birth against whatever string the
 // agent sends — observed live sending "January 1, 1998" instead of the YYYY-MM-DD the
 // prompt asks for, which would fail an otherwise-correct answer on a plain string

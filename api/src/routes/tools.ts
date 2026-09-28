@@ -4,7 +4,15 @@ import { pool, queryOne } from "../db.js";
 import { logAudit } from "../lib/audit.js";
 import { runClassification } from "../lib/kycProcessor.js";
 import { requireToolSecret } from "../middleware/auth.js";
-import { coerceBool, coerceObject, coerceOptionalString, coerceStringArray, isValidShortCode, matchesDob } from "../lib/coerce.js";
+import {
+  coerceBool,
+  coerceObject,
+  coerceOptionalString,
+  coerceStringArray,
+  isRealAnswer,
+  isValidShortCode,
+  matchesDob,
+} from "../lib/coerce.js";
 
 export const toolsRouter = Router();
 toolsRouter.use(requireToolSecret);
@@ -124,8 +132,10 @@ toolsRouter.post("/start-kyc-call", async (req, res) => {
 // (kyc_refresh_id also accepted as a fallback identifier — see resolveRefresh)
 toolsRouter.post("/verify-account", async (req, res) => {
   const { digit_number, dob } = req.body ?? {};
-  if (!digit_number || !dob) {
-    res.status(400).json({ error: "phone_number, digit_number and dob are required" });
+  if (!isRealAnswer(digit_number) || !isRealAnswer(dob)) {
+    res
+      .status(400)
+      .json({ error: "digit_number and dob must both be the customer's actual spoken answers — do not call this before you have both" });
     return;
   }
 
