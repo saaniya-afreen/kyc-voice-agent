@@ -20,10 +20,10 @@ interface RefreshRow {
   call_status: string;
 }
 
-export async function runClassification(kycRefreshId: string, input: Record<string, unknown>): Promise<ClassifyResult> {
+export async function runClassification(kycRefreshShortCode: string, input: Record<string, unknown>): Promise<ClassifyResult> {
   const refresh = await queryOne<RefreshRow>(
-    "select id, customer_id, call_status from kyc_refresh where id = $1",
-    [kycRefreshId]
+    "select id, customer_id, call_status from kyc_refresh where short_code = $1",
+    [kycRefreshShortCode]
   );
   if (!refresh) return { status: 404, body: { error: "kyc_refresh not found" } };
 

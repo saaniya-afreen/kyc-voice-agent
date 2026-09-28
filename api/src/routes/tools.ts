@@ -1,14 +1,23 @@
+import { randomBytes } from "node:crypto";
 import { Router } from "express";
 import { pool, queryOne } from "../db.js";
 import { logAudit } from "../lib/audit.js";
 import { runClassification } from "../lib/kycProcessor.js";
 import { requireToolSecret } from "../middleware/auth.js";
-import { coerceBool, coerceObject, coerceOptionalString, coerceStringArray, isValidUuid } from "../lib/coerce.js";
+import { coerceBool, coerceObject, coerceOptionalString, coerceStringArray, isValidShortCode } from "../lib/coerce.js";
 
 export const toolsRouter = Router();
 toolsRouter.use(requireToolSecret);
 
 const MAX_AUTH_ATTEMPTS = 3;
+
+function generateShortCode(): string {
+  return randomBytes(4).toString("hex");
+}
+
+function shortCodeError(value: unknown) {
+  return { error: `kyc_refresh_id is not a valid id: "${value}" — call start_kyc_call again and use the kyc_refresh_id it returns` };
+}
 
 // POST /v1/start-kyc-call
 // Call this first, before anything else, on every call — whether it was dispatched via
@@ -41,18 +50,22 @@ toolsRouter.post("/start-kyc-call", async (req, res) => {
     return;
   }
 
-  let refresh = await queryOne<{ id: string; contact_attempts: number; max_attempts: number }>(
-    `select id, contact_attempts, max_attempts from kyc_refresh
+  let refresh = await queryOne<{ id: string; short_code: string | null; contact_attempts: number; max_attempts: number }>(
+    `select id, short_code, contact_attempts, max_attempts from kyc_refresh
      where customer_id = $1 and call_status in ('pending', 'calling')
      order by created_at desc limit 1`,
     [customer.id]
   );
 
   if (!refresh) {
-    refresh = await queryOne<{ id: string; contact_attempts: number; max_attempts: number }>(
-      "insert into kyc_refresh (customer_id, trigger_source) values ($1, 'manual') returning id, contact_attempts, max_attempts",
-      [customer.id]
+    refresh = await queryOne<{ id: string; short_code: string | null; contact_attempts: number; max_attempts: number }>(
+      "insert into kyc_refresh (customer_id, trigger_source, short_code) values ($1, 'manual', $2) returning id, short_code, contact_attempts, max_attempts",
+      [customer.id, generateShortCode()]
     );
+  } else if (!refresh.short_code) {
+    // Pre-existing refresh row from before short_code existed — backfill it now.
+    refresh.short_code = generateShortCode();
+    await pool.query("update kyc_refresh set short_code = $2 where id = $1", [refresh.id, refresh.short_code]);
   }
 
   const nextAttempts = Math.min(refresh!.contact_attempts + 1, refresh!.max_attempts);
@@ -70,7 +83,7 @@ toolsRouter.post("/start-kyc-call", async (req, res) => {
   });
 
   res.json({
-    kyc_refresh_id: refresh!.id,
+    kyc_refresh_id: refresh!.short_code,
     customer_id: customer.id,
     customer_name: customer.full_name,
     employer: customer.employer,
@@ -90,13 +103,13 @@ toolsRouter.post("/verify-account", async (req, res) => {
     res.status(400).json({ error: "kyc_refresh_id, digit_number and dob are required" });
     return;
   }
-  if (!isValidUuid(kyc_refresh_id)) {
-    res.status(400).json({ error: `kyc_refresh_id is not a valid id: "${kyc_refresh_id}" — call start_kyc_call again and use the kyc_refresh_id it returns` });
+  if (!isValidShortCode(kyc_refresh_id)) {
+    res.status(400).json(shortCodeError(kyc_refresh_id));
     return;
   }
 
   const refresh = await queryOne<{ id: string; customer_id: string; auth_attempts: number; call_status: string }>(
-    "select id, customer_id, auth_attempts, call_status from kyc_refresh where id = $1",
+    "select id, customer_id, auth_attempts, call_status from kyc_refresh where short_code = $1",
     [kyc_refresh_id]
   );
   if (!refresh) {
@@ -129,15 +142,15 @@ toolsRouter.post("/verify-account", async (req, res) => {
   if (lockedOut) {
     await pool.query(
       "update kyc_refresh set auth_attempts = $2, call_status = 'failed', outcome_code = 'UC-D2' where id = $1",
-      [kyc_refresh_id, nextAttempts]
+      [refresh.id, nextAttempts]
     );
   } else {
-    await pool.query("update kyc_refresh set auth_attempts = $2 where id = $1", [kyc_refresh_id, nextAttempts]);
+    await pool.query("update kyc_refresh set auth_attempts = $2 where id = $1", [refresh.id, nextAttempts]);
   }
 
   await logAudit({
     customer_id: customer.id,
-    kyc_refresh_id,
+    kyc_refresh_id: refresh.id,
     event_type: authenticated ? "AUTH_SUCCESS" : lockedOut ? "AUTH_LOCKED_OUT" : "AUTH_FAILURE",
     actor: "voice_agent",
     new_data: { digits_match: digitsMatch, dob_match: dobMatch, attempt: nextAttempts },
@@ -160,14 +173,20 @@ toolsRouter.post("/uc2-get-next-crs-country", async (req, res) => {
     res.status(400).json({ error: "kyc_refresh_id and tax_residencies[] are required" });
     return;
   }
-  if (!isValidUuid(kyc_refresh_id)) {
-    res.status(400).json({ error: `kyc_refresh_id is not a valid id: "${kyc_refresh_id}" — call start_kyc_call again and use the kyc_refresh_id it returns` });
+  if (!isValidShortCode(kyc_refresh_id)) {
+    res.status(400).json(shortCodeError(kyc_refresh_id));
+    return;
+  }
+
+  const refresh = await queryOne<{ id: string }>("select id from kyc_refresh where short_code = $1", [kyc_refresh_id]);
+  if (!refresh) {
+    res.status(404).json({ error: "kyc_refresh not found" });
     return;
   }
 
   const recorded = await pool.query<{ country_code: string }>(
     "select country_code from kyc_customer_tins where kyc_refresh_id = $1",
-    [kyc_refresh_id]
+    [refresh.id]
   );
   const done = new Set(recorded.rows.map((r) => r.country_code.toUpperCase()));
   const remaining = tax_residencies.map((c) => c.toUpperCase()).filter((c) => c !== "AE" && !done.has(c));
@@ -187,12 +206,15 @@ toolsRouter.post("/uc2-store-tin-value", async (req, res) => {
     res.status(400).json({ error: "kyc_refresh_id, country_code and tin_value are required" });
     return;
   }
-  if (!isValidUuid(kyc_refresh_id)) {
-    res.status(400).json({ error: `kyc_refresh_id is not a valid id: "${kyc_refresh_id}" — call start_kyc_call again and use the kyc_refresh_id it returns` });
+  if (!isValidShortCode(kyc_refresh_id)) {
+    res.status(400).json(shortCodeError(kyc_refresh_id));
     return;
   }
 
-  const refresh = await queryOne<{ customer_id: string }>("select customer_id from kyc_refresh where id = $1", [kyc_refresh_id]);
+  const refresh = await queryOne<{ id: string; customer_id: string }>(
+    "select id, customer_id from kyc_refresh where short_code = $1",
+    [kyc_refresh_id]
+  );
   if (!refresh) {
     res.status(404).json({ error: "kyc_refresh not found" });
     return;
@@ -203,12 +225,12 @@ toolsRouter.post("/uc2-store-tin-value", async (req, res) => {
      values ($1, $2, $3, $4, true, null, null)
      on conflict (kyc_refresh_id, country_code)
      do update set tin_value = excluded.tin_value, is_available = true, reason_code = null, reason_explanation = null`,
-    [refresh.customer_id, kyc_refresh_id, String(country_code).toUpperCase(), tin_value]
+    [refresh.customer_id, refresh.id, String(country_code).toUpperCase(), tin_value]
   );
 
   await logAudit({
     customer_id: refresh.customer_id,
-    kyc_refresh_id,
+    kyc_refresh_id: refresh.id,
     event_type: "TIN_RECORDED",
     actor: "voice_agent",
     new_data: { country_code: String(country_code).toUpperCase() }, // never log the TIN value itself
@@ -225,12 +247,15 @@ toolsRouter.post("/uc2-store-tin-reason", async (req, res) => {
     res.status(400).json({ error: "kyc_refresh_id, country_code and reason_code (A|B|C) are required" });
     return;
   }
-  if (!isValidUuid(kyc_refresh_id)) {
-    res.status(400).json({ error: `kyc_refresh_id is not a valid id: "${kyc_refresh_id}" — call start_kyc_call again and use the kyc_refresh_id it returns` });
+  if (!isValidShortCode(kyc_refresh_id)) {
+    res.status(400).json(shortCodeError(kyc_refresh_id));
     return;
   }
 
-  const refresh = await queryOne<{ customer_id: string }>("select customer_id from kyc_refresh where id = $1", [kyc_refresh_id]);
+  const refresh = await queryOne<{ id: string; customer_id: string }>(
+    "select id, customer_id from kyc_refresh where short_code = $1",
+    [kyc_refresh_id]
+  );
   if (!refresh) {
     res.status(404).json({ error: "kyc_refresh not found" });
     return;
@@ -241,12 +266,12 @@ toolsRouter.post("/uc2-store-tin-reason", async (req, res) => {
      values ($1, $2, $3, null, false, $4, $5)
      on conflict (kyc_refresh_id, country_code)
      do update set tin_value = null, is_available = false, reason_code = excluded.reason_code, reason_explanation = excluded.reason_explanation`,
-    [refresh.customer_id, kyc_refresh_id, String(country_code).toUpperCase(), reason_code, reason_explanation ?? null]
+    [refresh.customer_id, refresh.id, String(country_code).toUpperCase(), reason_code, reason_explanation ?? null]
   );
 
   await logAudit({
     customer_id: refresh.customer_id,
-    kyc_refresh_id,
+    kyc_refresh_id: refresh.id,
     event_type: "TIN_EXCEPTION_RECORDED",
     actor: "voice_agent",
     new_data: { country_code: String(country_code).toUpperCase(), reason_code },
@@ -264,8 +289,8 @@ toolsRouter.post("/submit-kyc-screening", async (req, res) => {
     res.status(400).json({ error: "kyc_refresh_id is required" });
     return;
   }
-  if (!isValidUuid(kyc_refresh_id)) {
-    res.status(400).json({ error: `kyc_refresh_id is not a valid id: "${kyc_refresh_id}" — call start_kyc_call again and use the kyc_refresh_id it returns` });
+  if (!isValidShortCode(kyc_refresh_id)) {
+    res.status(400).json(shortCodeError(kyc_refresh_id));
     return;
   }
 

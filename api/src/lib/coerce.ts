@@ -46,11 +46,13 @@ export function coerceOptionalString(value: unknown): string | undefined {
   return value;
 }
 
-// Every kyc_refresh_id lookup goes into a `uuid` column — a malformed value (e.g. a
-// voice platform sending the literal placeholder text "unknown" when its own
-// {{kyc_refresh_id}} variable never got populated) would otherwise reach Postgres as
-// an invalid uuid input error. Reject it here with a clear 400 instead.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export function isValidUuid(value: unknown): value is string {
-  return typeof value === "string" && UUID_RE.test(value);
+// kyc_refresh_id, as exposed to the voice agent, is an 8-hex-char short_code (not the
+// real uuid primary key) — a voice model asked to reproduce a full uuid several turns
+// later is unreliable at it (mistyping or outright hallucinating one; observed live as
+// both the literal string "unknown" and a plausible-but-wrong uuid). A malformed value
+// would otherwise reach Postgres as a failed lookup with no useful signal why — reject
+// it here with a clear 400 instead.
+const SHORT_CODE_RE = /^[0-9a-f]{8}$/i;
+export function isValidShortCode(value: unknown): value is string {
+  return typeof value === "string" && SHORT_CODE_RE.test(value);
 }

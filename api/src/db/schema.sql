@@ -46,6 +46,11 @@ create table if not exists kyc_refresh (
   auth_attempts int not null default 0,
   call_status text not null default 'pending'
     check (call_status in ('pending', 'calling', 'completed', 'escalated', 'failed', 'refused', 'declined')),
+  -- Short opaque handle the voice agent gets back from start_kyc_call and must echo
+  -- on every later tool call in the same call. Voice models are unreliable at
+  -- reproducing a full UUID verbatim several turns later (mistyping or outright
+  -- hallucinating one) — 8 hex chars is short enough to copy correctly.
+  short_code text,
   provider_call_id text,
   call_recording_url text,
   call_transcript text,
@@ -54,9 +59,15 @@ create table if not exists kyc_refresh (
   created_at timestamptz not null default now()
 );
 
+-- kyc_refresh already existed before short_code was added above, so the `create
+-- table if not exists` block was a no-op on a live database and never added the
+-- column — this backfills it there, before the index below can reference it.
+alter table kyc_refresh add column if not exists short_code text;
+
 create index if not exists kyc_refresh_customer_id_idx on kyc_refresh (customer_id);
 create index if not exists kyc_refresh_call_status_idx on kyc_refresh (call_status);
 create index if not exists kyc_refresh_provider_call_id_idx on kyc_refresh (provider_call_id);
+create unique index if not exists kyc_refresh_short_code_idx on kyc_refresh (short_code) where short_code is not null;
 
 create table if not exists kyc_compliance_cases (
   id uuid primary key default gen_random_uuid(),
