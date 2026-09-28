@@ -56,3 +56,36 @@ const SHORT_CODE_RE = /^[0-9a-f]{8}$/i;
 export function isValidShortCode(value: unknown): value is string {
   return typeof value === "string" && SHORT_CODE_RE.test(value);
 }
+
+// verify-account compares the customer's date of birth against whatever string the
+// agent sends — observed live sending "January 1, 1998" instead of the YYYY-MM-DD the
+// prompt asks for, which would fail an otherwise-correct answer on a plain string
+// comparison. Accepts the exact stored format, a named-month format ("January 1,
+// 1998", "Jan 1 1998"), or a numeric date tried against every plausible
+// day/month/year ordering — never guesses a single ordering, since a wrong guess
+// there would misauthenticate someone.
+export function matchesDob(inputDob: unknown, storedIsoDob: string): boolean {
+  if (typeof inputDob !== "string") return false;
+  const trimmed = inputDob.trim();
+  if (trimmed === storedIsoDob) return true;
+
+  if (/[a-zA-Z]/.test(trimmed)) {
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) {
+      const iso = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
+      if (iso === storedIsoDob) return true;
+    }
+    return false;
+  }
+
+  const numeric = trimmed.match(/^(\d{1,4})[-/](\d{1,2})[-/](\d{1,4})$/);
+  if (!numeric) return false;
+  const [, a, b, c] = numeric;
+  const pad = (s: string, len: number) => s.padStart(len, "0");
+  const candidates = [
+    `${pad(c, 4)}-${pad(b, 2)}-${pad(a, 2)}`, // DD-MM-YYYY
+    `${pad(c, 4)}-${pad(a, 2)}-${pad(b, 2)}`, // MM-DD-YYYY
+    `${pad(a, 4)}-${pad(b, 2)}-${pad(c, 2)}`, // YYYY-MM-DD with non-standard separators
+  ];
+  return candidates.includes(storedIsoDob);
+}

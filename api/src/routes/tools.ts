@@ -4,7 +4,7 @@ import { pool, queryOne } from "../db.js";
 import { logAudit } from "../lib/audit.js";
 import { runClassification } from "../lib/kycProcessor.js";
 import { requireToolSecret } from "../middleware/auth.js";
-import { coerceBool, coerceObject, coerceOptionalString, coerceStringArray, isValidShortCode } from "../lib/coerce.js";
+import { coerceBool, coerceObject, coerceOptionalString, coerceStringArray, isValidShortCode, matchesDob } from "../lib/coerce.js";
 
 export const toolsRouter = Router();
 toolsRouter.use(requireToolSecret);
@@ -158,7 +158,7 @@ toolsRouter.post("/verify-account", async (req, res) => {
 
   const accountLast4 = customer.account_number.slice(-4);
   const digitsMatch = String(digit_number).trim() === accountLast4;
-  const dobMatch = customer.date_of_birth === dob;
+  const dobMatch = matchesDob(dob, customer.date_of_birth);
   const authenticated = digitsMatch && dobMatch;
 
   const nextAttempts = refresh.auth_attempts + 1;
