@@ -5,7 +5,7 @@
   "type": "module",
   "engines": { "node": ">=18" },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/db && cp src/db/*.sql dist/db/",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts"
   },
