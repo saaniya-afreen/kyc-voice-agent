@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Bot, User } from "lucide-react";
+import { ArrowLeft, Bot, RotateCcw, User } from "lucide-react";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, RiskBadge, StatusBadge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { OUTCOME_LABELS, type CustomerDetail as CustomerDetailType } from "@/lib/types";
 import { cn, formatDate, formatDateTime } from "@/lib/utils";
 
@@ -12,10 +13,20 @@ export default function CustomerDetail() {
   const navigate = useNavigate();
   const [customer, setCustomer] = useState<CustomerDetailType | null>(null);
   const [loading, setLoading] = useState(true);
+  const [resetting, setResetting] = useState(false);
+
+  function loadCustomer() {
+    if (!customerId) return;
+    setLoading(true);
+    return api
+      .get<CustomerDetailType>(`/v1/customers/${customerId}`)
+      .then((data) => setCustomer(data))
+      .finally(() => setLoading(false));
+  }
 
   useEffect(() => {
-    if (!customerId) return;
     let cancelled = false;
+    if (!customerId) return;
     setLoading(true);
     api
       .get<CustomerDetailType>(`/v1/customers/${customerId}`)
@@ -29,6 +40,18 @@ export default function CustomerDetail() {
       cancelled = true;
     };
   }, [customerId]);
+
+  async function handleReset() {
+    if (!customerId) return;
+    if (!confirm("Wipe all KYC refresh cycles for this customer and reset them to a clean 'due' state? This can't be undone.")) return;
+    setResetting(true);
+    try {
+      await api.post(`/v1/customers/${customerId}/reset-test-data`);
+      await loadCustomer();
+    } finally {
+      setResetting(false);
+    }
+  }
 
   if (loading || !customer) {
     return <p className="text-sm text-muted-foreground">Loading customer…</p>;
@@ -51,6 +74,10 @@ export default function CustomerDetail() {
           <RiskBadge tier={customer.risk_tier} />
           <StatusBadge status={customer.kyc_status} />
           {customer.activity_status === "dormant" && <Badge variant="muted">Dormant</Badge>}
+          <Button variant="outline" size="sm" onClick={handleReset} disabled={resetting}>
+            <RotateCcw className="h-3.5 w-3.5" />
+            {resetting ? "Resetting…" : "Reset for testing"}
+          </Button>
         </div>
       </div>
 

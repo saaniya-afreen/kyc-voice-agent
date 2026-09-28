@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { pool, queryOne } from "../db.js";
+import { queryOne } from "../db.js";
 import { env } from "../env.js";
-import { logAudit } from "../lib/audit.js";
+import { resetCustomerTestData } from "../lib/resetTestData.js";
 
 export const adminRouter = Router();
 
@@ -32,24 +32,12 @@ adminRouter.get("/reset-test-customer", async (req, res) => {
     return;
   }
 
-  const deleted = await pool.query("delete from kyc_refresh where customer_id = $1", [customer.id]);
-  await pool.query(
-    "update kyc_customers set kyc_status = 'due', activity_status = 'active', next_review_date = null where id = $1",
-    [customer.id]
-  );
-
-  await logAudit({
-    customer_id: customer.id,
-    kyc_refresh_id: null,
-    event_type: "TEST_DATA_RESET",
-    actor: "admin",
-    new_data: { kyc_refresh_cycles_deleted: deleted.rowCount },
-  });
+  const deletedCount = await resetCustomerTestData(customer.id, "admin");
 
   res.json({
     reset: true,
     customer_id: customer.id,
     customer_name: customer.full_name,
-    kyc_refresh_cycles_deleted: deleted.rowCount,
+    kyc_refresh_cycles_deleted: deletedCount,
   });
 });

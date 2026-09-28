@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { pool, queryOne } from "../db.js";
 import { requireOfficer } from "../middleware/auth.js";
+import { resetCustomerTestData } from "../lib/resetTestData.js";
 
 export const customersRouter = Router();
 customersRouter.use(requireOfficer);
@@ -87,4 +88,21 @@ customersRouter.get("/:id", async (req, res) => {
   const auditLogs = await pool.query("select * from kyc_audit_logs where customer_id = $1 order by created_at desc", [id]);
 
   res.json({ ...customer, refreshes: refreshes.rows, tins, audit_logs: auditLogs.rows });
+});
+
+// POST /v1/customers/:id/reset-test-data
+// Wipes every kyc_refresh cycle for this customer, back to a clean kyc_status='due'
+// baseline — the dashboard's "Reset for testing" button, so a stuck/completed/locked
+// test customer can be re-tested from scratch without building the admin URL by hand.
+customersRouter.post("/:id/reset-test-data", async (req, res) => {
+  const { id } = req.params;
+  const customer = await queryOne<{ id: string; full_name: string }>("select id, full_name from kyc_customers where id = $1", [id]);
+  if (!customer) {
+    res.status(404).json({ error: "customer not found" });
+    return;
+  }
+
+  const deletedCount = await resetCustomerTestData(customer.id, req.officer?.email ?? "dashboard");
+
+  res.json({ reset: true, customer_id: customer.id, customer_name: customer.full_name, kyc_refresh_cycles_deleted: deletedCount });
 });
