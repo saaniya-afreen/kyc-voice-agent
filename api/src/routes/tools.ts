@@ -15,16 +15,40 @@ function generateShortCode(): string {
   return randomBytes(4).toString("hex");
 }
 
-function shortCodeError(value: unknown) {
-  return { error: `kyc_refresh_id is not a valid id: "${value}" — call start_kyc_call again and use the kyc_refresh_id it returns` };
+// Resolves the customer's currently open kyc_refresh cycle for every tool after
+// start_kyc_call. Prefers `phone_number` — a real platform dynamic variable
+// (e.g. {{contact_number}}) the agent never has to author itself — over
+// `kyc_refresh_id`, which the model has to retype from memory several turns later
+// and has proven unreliable at in production (live logs showed it sending back a
+// fixed, unrelated value on every call, not even related to hallucination — some
+// stuck default upstream in the voice platform we don't have visibility into).
+// kyc_refresh_id/short_code is kept as a fallback for platforms without an
+// equivalent reliable phone variable.
+async function resolveRefresh(body: Record<string, unknown>): Promise<{ id: string; customer_id: string } | null> {
+  const phoneNumber = typeof body.phone_number === "string" ? body.phone_number.trim() : "";
+  if (phoneNumber) {
+    const customer = await queryOne<{ id: string }>("select id from kyc_customers where phone_e164 = $1", [phoneNumber]);
+    if (!customer) return null;
+    return queryOne<{ id: string; customer_id: string }>(
+      `select id, customer_id from kyc_refresh
+       where customer_id = $1 and call_status = 'calling'
+       order by created_at desc limit 1`,
+      [customer.id]
+    );
+  }
+  if (isValidShortCode(body.kyc_refresh_id)) {
+    return queryOne<{ id: string; customer_id: string }>(
+      "select id, customer_id from kyc_refresh where short_code = $1",
+      [body.kyc_refresh_id]
+    );
+  }
+  return null;
 }
 
 // POST /v1/start-kyc-call
 // Call this first, before anything else, on every call — whether it was dispatched via
 // /v1/trigger-outbound-call or placed manually from your voice platform. Looks the
-// customer up by the number being dialed and opens (or resumes) their refresh cycle,
-// so the agent gets kyc_refresh_id + profile fields without needing platform-native
-// dynamic variables wired up.
+// customer up by the number being dialed and opens (or resumes) their refresh cycle.
 // Body: { phone_number } -> { kyc_refresh_id, customer_id, customer_name, employer,
 //         occupation, address, risk_tier, attempts_used, max_attempts }
 toolsRouter.post("/start-kyc-call", async (req, res) => {
@@ -96,21 +120,23 @@ toolsRouter.post("/start-kyc-call", async (req, res) => {
 });
 
 // POST /v1/verify-account
-// Body: { kyc_refresh_id, digit_number, dob } -> { authenticated, customer_name, attempts_remaining, locked_out }
+// Body: { phone_number, digit_number, dob } -> { authenticated, customer_name, attempts_remaining, locked_out }
+// (kyc_refresh_id also accepted as a fallback identifier — see resolveRefresh)
 toolsRouter.post("/verify-account", async (req, res) => {
-  const { kyc_refresh_id, digit_number, dob } = req.body ?? {};
-  if (!kyc_refresh_id || !digit_number || !dob) {
-    res.status(400).json({ error: "kyc_refresh_id, digit_number and dob are required" });
-    return;
-  }
-  if (!isValidShortCode(kyc_refresh_id)) {
-    res.status(400).json(shortCodeError(kyc_refresh_id));
+  const { digit_number, dob } = req.body ?? {};
+  if (!digit_number || !dob) {
+    res.status(400).json({ error: "phone_number, digit_number and dob are required" });
     return;
   }
 
+  const refreshRef = await resolveRefresh(req.body ?? {});
+  if (!refreshRef) {
+    res.status(404).json({ error: "no open kyc_refresh found for that phone number — call start_kyc_call again" });
+    return;
+  }
   const refresh = await queryOne<{ id: string; customer_id: string; auth_attempts: number; call_status: string }>(
-    "select id, customer_id, auth_attempts, call_status from kyc_refresh where short_code = $1",
-    [kyc_refresh_id]
+    "select id, customer_id, auth_attempts, call_status from kyc_refresh where id = $1",
+    [refreshRef.id]
   );
   if (!refresh) {
     res.status(404).json({ error: "kyc_refresh not found" });
@@ -165,22 +191,13 @@ toolsRouter.post("/verify-account", async (req, res) => {
 });
 
 // POST /v1/uc2-get-next-crs-country
-// Body: { kyc_refresh_id, tax_residencies[] } -> { next_country_code, is_finished, remaining_count }
+// Body: { phone_number, tax_residencies[] } -> { next_country_code, is_finished, remaining_count }
 toolsRouter.post("/uc2-get-next-crs-country", async (req, res) => {
-  const { kyc_refresh_id } = req.body ?? {};
   const tax_residencies = coerceStringArray(req.body?.tax_residencies);
-  if (!kyc_refresh_id) {
-    res.status(400).json({ error: "kyc_refresh_id and tax_residencies[] are required" });
-    return;
-  }
-  if (!isValidShortCode(kyc_refresh_id)) {
-    res.status(400).json(shortCodeError(kyc_refresh_id));
-    return;
-  }
 
-  const refresh = await queryOne<{ id: string }>("select id from kyc_refresh where short_code = $1", [kyc_refresh_id]);
+  const refresh = await resolveRefresh(req.body ?? {});
   if (!refresh) {
-    res.status(404).json({ error: "kyc_refresh not found" });
+    res.status(404).json({ error: "no open kyc_refresh found for that phone number — call start_kyc_call again" });
     return;
   }
 
@@ -199,24 +216,17 @@ toolsRouter.post("/uc2-get-next-crs-country", async (req, res) => {
 });
 
 // POST /v1/uc2-store-tin-value
-// Body: { kyc_refresh_id, country_code, tin_value } -> { success }
+// Body: { phone_number, country_code, tin_value } -> { success }
 toolsRouter.post("/uc2-store-tin-value", async (req, res) => {
-  const { kyc_refresh_id, country_code, tin_value } = req.body ?? {};
-  if (!kyc_refresh_id || !country_code || !tin_value) {
-    res.status(400).json({ error: "kyc_refresh_id, country_code and tin_value are required" });
-    return;
-  }
-  if (!isValidShortCode(kyc_refresh_id)) {
-    res.status(400).json(shortCodeError(kyc_refresh_id));
+  const { country_code, tin_value } = req.body ?? {};
+  if (!country_code || !tin_value) {
+    res.status(400).json({ error: "phone_number, country_code and tin_value are required" });
     return;
   }
 
-  const refresh = await queryOne<{ id: string; customer_id: string }>(
-    "select id, customer_id from kyc_refresh where short_code = $1",
-    [kyc_refresh_id]
-  );
+  const refresh = await resolveRefresh(req.body ?? {});
   if (!refresh) {
-    res.status(404).json({ error: "kyc_refresh not found" });
+    res.status(404).json({ error: "no open kyc_refresh found for that phone number — call start_kyc_call again" });
     return;
   }
 
@@ -240,24 +250,17 @@ toolsRouter.post("/uc2-store-tin-value", async (req, res) => {
 });
 
 // POST /v1/uc2-store-tin-reason
-// Body: { kyc_refresh_id, country_code, reason_code: "A"|"B"|"C", reason_explanation? } -> { success }
+// Body: { phone_number, country_code, reason_code: "A"|"B"|"C", reason_explanation? } -> { success }
 toolsRouter.post("/uc2-store-tin-reason", async (req, res) => {
-  const { kyc_refresh_id, country_code, reason_code, reason_explanation } = req.body ?? {};
-  if (!kyc_refresh_id || !country_code || !["A", "B", "C"].includes(reason_code)) {
-    res.status(400).json({ error: "kyc_refresh_id, country_code and reason_code (A|B|C) are required" });
-    return;
-  }
-  if (!isValidShortCode(kyc_refresh_id)) {
-    res.status(400).json(shortCodeError(kyc_refresh_id));
+  const { country_code, reason_code, reason_explanation } = req.body ?? {};
+  if (!country_code || !["A", "B", "C"].includes(reason_code)) {
+    res.status(400).json({ error: "phone_number, country_code and reason_code (A|B|C) are required" });
     return;
   }
 
-  const refresh = await queryOne<{ id: string; customer_id: string }>(
-    "select id, customer_id from kyc_refresh where short_code = $1",
-    [kyc_refresh_id]
-  );
+  const refresh = await resolveRefresh(req.body ?? {});
   if (!refresh) {
-    res.status(404).json({ error: "kyc_refresh not found" });
+    res.status(404).json({ error: "no open kyc_refresh found for that phone number — call start_kyc_call again" });
     return;
   }
 
@@ -281,16 +284,14 @@ toolsRouter.post("/uc2-store-tin-reason", async (req, res) => {
 });
 
 // POST /v1/submit-kyc-screening
-// Either { kyc_refresh_id, terminal_reason } or the full screening payload — see docs/architecture.md
+// { phone_number, terminal_reason } or the full screening payload — see docs/architecture.md
 toolsRouter.post("/submit-kyc-screening", async (req, res) => {
   const body = req.body ?? {};
-  const { kyc_refresh_id, terminal_reason } = body;
-  if (!kyc_refresh_id) {
-    res.status(400).json({ error: "kyc_refresh_id is required" });
-    return;
-  }
-  if (!isValidShortCode(kyc_refresh_id)) {
-    res.status(400).json(shortCodeError(kyc_refresh_id));
+  const { terminal_reason } = body;
+
+  const refresh = await resolveRefresh(body);
+  if (!refresh) {
+    res.status(404).json({ error: "no open kyc_refresh found for that phone number — call start_kyc_call again" });
     return;
   }
 
@@ -311,6 +312,6 @@ toolsRouter.post("/submit-kyc-screening", async (req, res) => {
         account_structure: coerceOptionalString(body.account_structure),
       };
 
-  const result = await runClassification(kyc_refresh_id, input);
+  const result = await runClassification(refresh.id, input);
   res.status(result.status).json(result.body);
 });

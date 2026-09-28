@@ -20,10 +20,13 @@ interface RefreshRow {
   call_status: string;
 }
 
-export async function runClassification(kycRefreshShortCode: string, input: Record<string, unknown>): Promise<ClassifyResult> {
+// Takes the real kyc_refresh.id — the caller (tools.ts) has already resolved whatever
+// identifier the agent sent (phone_number, preferably, or a short_code fallback) into
+// this real id via resolveRefresh.
+export async function runClassification(kycRefreshId: string, input: Record<string, unknown>): Promise<ClassifyResult> {
   const refresh = await queryOne<RefreshRow>(
-    "select id, customer_id, call_status from kyc_refresh where short_code = $1",
-    [kycRefreshShortCode]
+    "select id, customer_id, call_status from kyc_refresh where id = $1",
+    [kycRefreshId]
   );
   if (!refresh) return { status: 404, body: { error: "kyc_refresh not found" } };
 
