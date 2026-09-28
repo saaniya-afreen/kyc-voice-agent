@@ -14,18 +14,27 @@ const TEST_CONTACTS = [
     phone_e164: "+919901108427",
     account_number: "1234500001",
     date_of_birth: "1998-01-01",
+    employer: "Vibtree Technologies",
+    occupation: "Product Manager",
+    address: "Bangalore, Karnataka, India",
   },
   {
     full_name: "Shivam",
     phone_e164: "+917014685581",
     account_number: "1234500002",
     date_of_birth: "1995-05-15",
+    employer: "Vibtree Technologies",
+    occupation: "Software Engineer",
+    address: "Mumbai, Maharashtra, India",
   },
   {
     full_name: "Jayant",
     phone_e164: "+919508509567",
     account_number: "1234500003",
     date_of_birth: "1993-08-20",
+    employer: "Vibtree Technologies",
+    occupation: "Sales Manager",
+    address: "Delhi, India",
   },
 ];
 
@@ -70,16 +79,36 @@ async function seedDemoData(): Promise<void> {
 }
 
 // Real phone numbers used for manually-triggered live testing — kept separate from
-// seedDemoData so it still runs (and picks up newly added contacts) even after the
-// one-time demo data insert has already happened on a prior deploy.
+// seedDemoData so it still runs (and picks up newly added/edited contacts) even
+// after the one-time demo data insert has already happened on a prior deploy.
+// Re-applies employer/occupation/address on every boot so editing TEST_CONTACTS
+// above and redeploying is enough to update them.
 async function seedTestContacts(): Promise<void> {
   for (const contact of TEST_CONTACTS) {
-    const existing = await queryOne("select id from kyc_customers where phone_e164 = $1", [contact.phone_e164]);
-    if (existing) continue;
+    const existing = await queryOne<{ id: string }>("select id from kyc_customers where phone_e164 = $1", [
+      contact.phone_e164,
+    ]);
+    if (existing) {
+      await pool.query("update kyc_customers set employer = $2, occupation = $3, address = $4 where id = $1", [
+        existing.id,
+        contact.employer,
+        contact.occupation,
+        contact.address,
+      ]);
+      continue;
+    }
     await pool.query(
-      `insert into kyc_customers (full_name, phone_e164, account_number, date_of_birth, risk_tier, kyc_status, activity_status, next_review_date)
-       values ($1, $2, $3, $4, 'medium', 'due', 'active', current_date)`,
-      [contact.full_name, contact.phone_e164, contact.account_number, contact.date_of_birth]
+      `insert into kyc_customers (full_name, phone_e164, account_number, date_of_birth, employer, occupation, address, risk_tier, kyc_status, activity_status, next_review_date)
+       values ($1, $2, $3, $4, $5, $6, $7, 'medium', 'due', 'active', current_date)`,
+      [
+        contact.full_name,
+        contact.phone_e164,
+        contact.account_number,
+        contact.date_of_birth,
+        contact.employer,
+        contact.occupation,
+        contact.address,
+      ]
     );
     console.log(`seed: created test contact ${contact.full_name} (${contact.phone_e164})`);
   }
