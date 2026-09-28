@@ -12,6 +12,8 @@ import { customersRouter } from "./routes/customers.js";
 import { complianceCasesRouter } from "./routes/complianceCases.js";
 import { overviewRouter } from "./routes/overview.js";
 import { adminRouter } from "./routes/admin.js";
+import { logsRouter } from "./routes/logs.js";
+import { recordRequest } from "./lib/requestLog.js";
 
 const app = express();
 app.use(cors({ origin: env.corsOrigin }));
@@ -38,7 +40,13 @@ app.use((req, res, next) => {
   res.on("finish", () => {
     const body = req.body && typeof req.body === "object" ? { ...req.body } : req.body;
     if (body && typeof body === "object" && "ssn" in body) body.ssn = "[redacted]";
-    console.log(`${req.method} ${req.originalUrl} -> ${res.statusCode} (${Date.now() - startedAt}ms) body=${JSON.stringify(body)}`);
+    const tookMs = Date.now() - startedAt;
+    console.log(`${req.method} ${req.originalUrl} -> ${res.statusCode} (${tookMs}ms) body=${JSON.stringify(body)}`);
+    // Skip the Logs page's own polling requests — they'd otherwise flood the buffer
+    // with noise about themselves.
+    if (!req.originalUrl.startsWith("/v1/logs")) {
+      recordRequest({ method: req.method, path: req.originalUrl, status: res.statusCode, tookMs, body });
+    }
   });
   next();
 });
@@ -50,6 +58,7 @@ app.use("/v1/customers", customersRouter);
 app.use("/v1/compliance-cases", complianceCasesRouter);
 app.use("/v1/overview", overviewRouter);
 app.use("/v1/admin", adminRouter);
+app.use("/v1/logs", logsRouter);
 // Agent tool endpoints live at the bare path each tool is registered with
 // (POST /v1/verify-account, /v1/uc2-get-next-crs-country, ..., /v1/submit-kyc-screening).
 app.use("/v1", toolsRouter);

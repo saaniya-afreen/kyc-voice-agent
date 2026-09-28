@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, ListChecks, ShieldAlert, LogOut } from "lucide-react";
+import { LayoutDashboard, ListChecks, ShieldAlert, Terminal, LogOut } from "lucide-react";
 import { logout } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/worklist", label: "KYC Worklist", icon: ListChecks, end: false },
   { to: "/compliance", label: "Compliance Queue", icon: ShieldAlert, end: false },
+  { to: "/logs", label: "API Logs", icon: Terminal, end: false },
 ];
 
 export function Layout() {

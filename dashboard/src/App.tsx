@@ -8,6 +8,7 @@ import Worklist from "@/pages/Worklist";
 import ComplianceQueue from "@/pages/ComplianceQueue";
 import CaseDetail from "@/pages/CaseDetail";
 import CustomerDetail from "@/pages/CustomerDetail";
+import Logs from "@/pages/Logs";
 
 // VITE_AUTH_DISABLED matches the API's DASHBOARD_AUTH_DISABLED — set for throwaway
 // testing only. Never build with this on for a deployment holding real customer data.
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/compliance" element={<ComplianceQueue />} />
         <Route path="/compliance/:caseId" element={<CaseDetail />} />
         <Route path="/customers/:customerId" element={<CustomerDetail />} />
+        <Route path="/logs" element={<Logs />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
