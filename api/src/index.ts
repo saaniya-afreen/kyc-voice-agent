@@ -10,6 +10,7 @@ import { callsRouter } from "./routes/calls.js";
 import { customersRouter } from "./routes/customers.js";
 import { complianceCasesRouter } from "./routes/complianceCases.js";
 import { overviewRouter } from "./routes/overview.js";
+import { adminRouter } from "./routes/admin.js";
 
 const app = express();
 app.use(cors({ origin: env.corsOrigin }));
@@ -34,6 +35,7 @@ app.use("/v1/call-events", webhookRouter);
 app.use("/v1/customers", customersRouter);
 app.use("/v1/compliance-cases", complianceCasesRouter);
 app.use("/v1/overview", overviewRouter);
+app.use("/v1/admin", adminRouter);
 // Agent tool endpoints live at the bare path each tool is registered with
 // (POST /v1/verify-account, /v1/uc2-get-next-crs-country, ..., /v1/submit-kyc-screening).
 app.use("/v1", toolsRouter);
