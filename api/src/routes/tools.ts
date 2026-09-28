@@ -31,7 +31,7 @@ async function resolveRefresh(body: Record<string, unknown>): Promise<{ id: stri
     if (!customer) return null;
     return queryOne<{ id: string; customer_id: string }>(
       `select id, customer_id from kyc_refresh
-       where customer_id = $1 and call_status = 'calling'
+       where customer_id = $1 and call_status in ('pending', 'calling')
        order by created_at desc limit 1`,
       [customer.id]
     );
