@@ -9,6 +9,78 @@ toolsRouter.use(requireToolSecret);
 
 const MAX_AUTH_ATTEMPTS = 3;
 
+// POST /v1/start-kyc-call
+// Call this first, before anything else, on every call — whether it was dispatched via
+// /v1/trigger-outbound-call or placed manually from your voice platform. Looks the
+// customer up by the number being dialed and opens (or resumes) their refresh cycle,
+// so the agent gets kyc_refresh_id + profile fields without needing platform-native
+// dynamic variables wired up.
+// Body: { phone_number } -> { kyc_refresh_id, customer_id, customer_name, employer,
+//         occupation, address, risk_tier, attempts_used, max_attempts }
+toolsRouter.post("/start-kyc-call", async (req, res) => {
+  const { phone_number } = req.body ?? {};
+  if (!phone_number) {
+    res.status(400).json({ error: "phone_number is required" });
+    return;
+  }
+
+  const customer = await queryOne<{
+    id: string;
+    full_name: string;
+    employer: string | null;
+    occupation: string | null;
+    address: string | null;
+    risk_tier: string;
+  }>(
+    "select id, full_name, employer, occupation, address, risk_tier from kyc_customers where phone_e164 = $1",
+    [String(phone_number).trim()]
+  );
+  if (!customer) {
+    res.status(404).json({ error: `no customer on file for ${phone_number}` });
+    return;
+  }
+
+  let refresh = await queryOne<{ id: string; contact_attempts: number; max_attempts: number }>(
+    `select id, contact_attempts, max_attempts from kyc_refresh
+     where customer_id = $1 and call_status in ('pending', 'calling')
+     order by created_at desc limit 1`,
+    [customer.id]
+  );
+
+  if (!refresh) {
+    refresh = await queryOne<{ id: string; contact_attempts: number; max_attempts: number }>(
+      "insert into kyc_refresh (customer_id, trigger_source) values ($1, 'manual') returning id, contact_attempts, max_attempts",
+      [customer.id]
+    );
+  }
+
+  const nextAttempts = Math.min(refresh!.contact_attempts + 1, refresh!.max_attempts);
+  await pool.query(
+    "update kyc_refresh set contact_attempts = $2, auth_attempts = 0, call_status = 'calling', last_call_at = now() where id = $1",
+    [refresh!.id, nextAttempts]
+  );
+
+  await logAudit({
+    customer_id: customer.id,
+    kyc_refresh_id: refresh!.id,
+    event_type: "CALL_STARTED_MANUAL",
+    actor: "voice_agent",
+    new_data: { attempt: nextAttempts },
+  });
+
+  res.json({
+    kyc_refresh_id: refresh!.id,
+    customer_id: customer.id,
+    customer_name: customer.full_name,
+    employer: customer.employer,
+    occupation: customer.occupation,
+    address: customer.address,
+    risk_tier: customer.risk_tier,
+    attempts_used: nextAttempts,
+    max_attempts: refresh!.max_attempts,
+  });
+});
+
 // POST /v1/verify-account
 // Body: { kyc_refresh_id, digit_number, dob } -> { authenticated, customer_name, attempts_remaining, locked_out }
 toolsRouter.post("/verify-account", async (req, res) => {

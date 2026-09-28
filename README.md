@@ -31,7 +31,7 @@ dashboard/                  React + Tailwind compliance officer app (Render stat
 docs/
   architecture.md            how it all fits together
   voice-agent-system-prompt.md  paste-able system prompt for the agent
-  tool-definitions.json      the six custom tools, ready to register on your agent
+  tool-definitions.json      the seven custom tools, ready to register on your agent
 ```
 
 ## 1. Deploy the API + database
@@ -57,7 +57,7 @@ safe on every deploy). No separate migration step needed.
 ## 2. Wire it into your voice agent
 
 1. Create the KYC refresh agent on your platform.
-2. Register the six tools from [`docs/tool-definitions.json`](docs/tool-definitions.json),
+2. Register the seven tools from [`docs/tool-definitions.json`](docs/tool-definitions.json),
    replacing `{{API_BASE_URL}}` with your deployed API's URL. Every tool
    needs the header `X-Tool-Secret: <AGENT_TOOL_SECRET>`.
 3. Paste [`docs/voice-agent-system-prompt.md`](docs/voice-agent-system-prompt.md)

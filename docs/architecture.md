@@ -11,7 +11,8 @@ agent couldn't resolve on its own.
         │  custom tool calls during the conversation
         ▼
  api/ — Node/Express service on Render ─────┐
-   POST /v1/verify-account                   │
+   POST /v1/start-kyc-call                    │ (call this first — looks the customer
+   POST /v1/verify-account                   │  up by number dialed, opens the cycle)
    POST /v1/uc2-get-next-crs-country          │ reads / writes
    POST /v1/uc2-store-tin-value                │
    POST /v1/uc2-store-tin-reason               ▼
@@ -70,6 +71,22 @@ the same fields), the `call_analyzed` event runs the identical classification
 logic from the platform's extracted data (`api/src/lib/kycProcessor.ts`, used
 by both routes). If the agent already closed the cycle out, the webhook is a
 no-op.
+
+## Opening a call: dispatched vs. manually triggered
+
+`start-kyc-call` is the one tool the agent calls unconditionally, before anything
+else, on every call. It looks the customer up by `phone_number` (the number being
+dialed) and finds-or-creates their open `kyc_refresh` cycle, returning
+`kyc_refresh_id` plus their profile fields as reply values. This makes the whole
+flow work identically whether the call was:
+
+- **dispatched** via `POST /v1/trigger-outbound-call` (the dashboard's "Trigger
+  call" button, which also calls your voice platform's own call-creation API), or
+- **triggered manually** from your voice platform's own UI, with no involvement
+  from this API at all until the agent picks up and calls `start-kyc-call`.
+
+Either way `contact_attempts` still increments and `last_call_at` still updates, so
+attempt counts and audit history stay accurate regardless of how the call started.
 
 ## Two ways to close a call
 
