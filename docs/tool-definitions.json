@@ -1,11 +1,11 @@
 {
-  "_readme": "Custom tools for the KYC Refresh voice agent. Each `url` is one of this project's Supabase edge functions — replace {{FUNCTION_BASE_URL}} with https://<your-project-ref>.supabase.co/functions/v1 (or wherever you deploy them) when you register these as custom tools/functions on your agent. The fields here (type/name/url/parameters/speak_during_execution) follow a common custom-function tool shape — if your platform nests the JSON schema differently (e.g. under a `function` object), move `parameters` there; the schema itself doesn't change. `kyc_refresh_id` is handed to the agent as a dynamic variable at call start (see voice-agent-system-prompt.md) — pass it through on every tool call. Every one of these endpoints requires a static header `X-Tool-Secret: <your AGENT_TOOL_SECRET>` — set it as a custom header on each tool's config alongside its URL.",
+  "_readme": "Custom tools for the KYC Refresh voice agent. Each `url` is one of this project's API routes — replace {{API_BASE_URL}} with your deployed API's URL (e.g. https://kyc-voice-agent-api.onrender.com) when you register these as custom tools/functions on your agent. The fields here (type/name/url/parameters/speak_during_execution) follow a common custom-function tool shape — if your platform nests the JSON schema differently (e.g. under a `function` object), move `parameters` there; the schema itself doesn't change. `kyc_refresh_id` is handed to the agent as a dynamic variable at call start (see voice-agent-system-prompt.md) — pass it through on every tool call. Every one of these endpoints requires a static header `X-Tool-Secret: <your AGENT_TOOL_SECRET>` — set it as a custom header on each tool's config alongside its URL.",
   "tools": [
     {
       "type": "custom",
       "name": "verify_account",
       "description": "Verifies the customer's identity against the last 4 digits of their account number and date of birth. Call this once per attempt during the 2FA step. Allows up to 3 attempts per call; after that the call must end.",
-      "url": "{{FUNCTION_BASE_URL}}/verify-account",
+      "url": "{{API_BASE_URL}}/v1/verify-account",
       "speak_during_execution": false,
       "speak_after_execution": true,
       "parameters": {
@@ -22,7 +22,7 @@
       "type": "custom",
       "name": "get_next_crs_country",
       "description": "Given the full list of foreign tax residencies the customer just declared, returns the next country to collect a TIN for (skipping ones already recorded this call) and whether TIN collection is finished.",
-      "url": "{{FUNCTION_BASE_URL}}/uc2-get-next-crs-country",
+      "url": "{{API_BASE_URL}}/v1/uc2-get-next-crs-country",
       "speak_during_execution": false,
       "speak_after_execution": false,
       "parameters": {
@@ -42,7 +42,7 @@
       "type": "custom",
       "name": "store_tin_value",
       "description": "Saves a Tax Identification Number the customer provided for a specific country.",
-      "url": "{{FUNCTION_BASE_URL}}/uc2-store-tin-value",
+      "url": "{{API_BASE_URL}}/v1/uc2-store-tin-value",
       "speak_during_execution": false,
       "speak_after_execution": true,
       "parameters": {
@@ -59,7 +59,7 @@
       "type": "custom",
       "name": "store_tin_reason",
       "description": "Records why a customer cannot provide a TIN for a country, using the OECD exception reason codes: A = the country does not issue TINs, B = the customer is unable to obtain one, C = not required under that country's domestic law.",
-      "url": "{{FUNCTION_BASE_URL}}/uc2-store-tin-reason",
+      "url": "{{API_BASE_URL}}/v1/uc2-store-tin-reason",
       "speak_during_execution": false,
       "speak_after_execution": true,
       "parameters": {
@@ -77,7 +77,7 @@
       "type": "custom",
       "name": "submit_kyc_screening",
       "description": "Submits the fully collected screening answers for final classification once the customer has confirmed their declaration is true and complete. Returns whether the refresh auto-completed or was escalated to the compliance team — use the response to choose your closing line.",
-      "url": "{{FUNCTION_BASE_URL}}/submit-kyc-screening",
+      "url": "{{API_BASE_URL}}/v1/submit-kyc-screening",
       "speak_during_execution": false,
       "speak_after_execution": true,
       "parameters": {
@@ -109,7 +109,7 @@
       "type": "custom",
       "name": "end_call_early",
       "description": "Closes out the refresh cycle for a call that is ending before reaching submit_kyc_screening: the customer declined to give consent at the start, declined to make the required declaration, or declined to proceed for some other reason. Call this immediately before hanging up.",
-      "url": "{{FUNCTION_BASE_URL}}/submit-kyc-screening",
+      "url": "{{API_BASE_URL}}/v1/submit-kyc-screening",
       "speak_during_execution": false,
       "speak_after_execution": false,
       "parameters": {

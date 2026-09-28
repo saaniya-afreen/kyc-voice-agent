@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { LayoutDashboard, ListChecks, ShieldAlert, LogOut } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { logout } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -11,11 +11,12 @@ const NAV_ITEMS = [
 ];
 
 export function Layout() {
-  const { session } = useAuth();
+  const { officer, setOfficer } = useAuth();
   const navigate = useNavigate();
 
-  async function handleLogout() {
-    await supabase.auth.signOut();
+  function handleLogout() {
+    logout();
+    setOfficer(null);
     navigate("/login", { replace: true });
   }
 
@@ -44,7 +45,7 @@ export function Layout() {
           ))}
         </nav>
         <div className="border-t border-border p-3">
-          <div className="mb-2 truncate text-xs text-muted-foreground">{session?.user.email}</div>
+          <div className="mb-2 truncate text-xs text-muted-foreground">{officer?.email}</div>
           <button
             onClick={handleLogout}
             className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"

@@ -10,35 +10,36 @@ agent couldn't resolve on its own.
  Your voice platform (agent + telephony)
         │  custom tool calls during the conversation
         ▼
- Supabase edge functions  ──────────────┐
-   verify-account                        │
-   uc2-get-next-crs-country               │ reads / writes
-   uc2-store-tin-value                    │
-   uc2-store-tin-reason                   ▼
-   submit-kyc-screening  ───────►  Postgres (customers, kyc_refresh,
-        ▲                          compliance_cases, customer_tins,
-        │ post-call webhook        audit_logs)
-   call-events                          ▲
-        │                                 │ RLS (authenticated role)
- trigger-outbound-call ◄── dashboard ──────┘
-   (dispatches calls)      "Trigger call" / case review / audit trail
+ api/ — Node/Express service on Render ─────┐
+   POST /v1/verify-account                   │
+   POST /v1/uc2-get-next-crs-country          │ reads / writes
+   POST /v1/uc2-store-tin-value                │
+   POST /v1/uc2-store-tin-reason               ▼
+   POST /v1/submit-kyc-screening  ───►  Render Postgres (customers, kyc_refresh,
+        ▲                              compliance_cases, customer_tins,
+        │ webhook (post-call events)   audit_logs, officers)
+   POST /v1/call-events                        ▲
+        │                                      │ Bearer <officer JWT>
+   POST /v1/trigger-outbound-call ◄── dashboard/ ── static site on Render
+   GET  /v1/customers, /v1/compliance-cases,    "Trigger call" / case review / audit trail
+        /v1/overview, POST /v1/auth/login
 ```
 
-- **Edge functions** (`supabase/functions/`) are the API surface — register
-  their URLs as your agent's custom tools (see `tool-definitions.json`) and as
-  its webhook target (`call-events`). They run with the Postgres
-  `service_role` key and are the only thing with write access to sensitive
-  fields.
-- **Dashboard** (`dashboard/`) is a Vite/React app compliance officers log
-  into (Supabase Auth). It reads and writes tables directly through
-  Supabase's client SDK under RLS, and calls `trigger-outbound-call` (via
-  `supabase.functions.invoke`) to dispatch calls — it never talks to your
-  voice platform directly, so its API key stays server-side.
-- **`_shared/oneinbox.ts`** is the one file that knows how to ask your voice
-  platform to place a call. It's written to the OneInbox convention (`POST
-  /v1/calls`, `Authorization: Bearer <key>`) seen in OneInbox's own
-  dashboard client; if your platform's call-creation contract differs, that's
-  the only file you need to change.
+- **`api/`** is the whole API surface — a single Node/Express service. Register
+  the agent-facing routes as your agent's custom tools (see
+  `docs/tool-definitions.json`) and as its webhook target
+  (`/v1/call-events`). Everything runs with a direct Postgres connection and
+  is the only thing with write access to sensitive fields.
+- **`dashboard/`** is a Vite/React app compliance officers log into (email +
+  password against the `officers` table, JWT session). It calls the API's
+  `/v1/customers`, `/v1/compliance-cases`, `/v1/overview` routes to read data
+  and `/v1/trigger-outbound-call` to dispatch calls — it never talks to
+  Postgres or your voice platform directly.
+- **`api/src/lib/voicePlatform.ts`** is the one file that knows how to ask
+  your voice platform to place a call. It's written to the OneInbox
+  convention (`POST /v1/calls`, `Authorization: Bearer <key>`); if your
+  platform's call-creation contract differs, that's the only file you need to
+  change.
 
 ## The ten call-flow outcomes
 
@@ -66,15 +67,18 @@ whether the agent ever reaches the screening questions.
 call ends and the agent never explicitly called `submit-kyc-screening` (e.g.
 it hung up mid-script, or your platform's own post-call analysis extracted
 the same fields), the `call_analyzed` event runs the identical classification
-logic from the platform's extracted data. If the agent already closed the
-cycle out, the webhook is a no-op.
+logic from the platform's extracted data (`api/src/lib/kycProcessor.ts`, used
+by both routes). If the agent already closed the cycle out, the webhook is a
+no-op.
 
 ## Two ways to close a call
 
-The agent has exactly two ways to end a refresh cycle:
+The agent has exactly two ways to end a refresh cycle, both hitting the same
+`submit_kyc_screening` tool:
 
-1. **`submit_kyc_screening`** → full screening payload → UC-1.x or UC-2.x.
-2. **`end_call_early`** → `terminal_reason` → UC-D1, UC-D3, or UC-D4.
+1. **Full screening payload** → UC-1.x or UC-2.x.
+2. **`terminal_reason`** (via the `end_call_early` tool, same URL) → UC-D1,
+   UC-D3, or UC-D4.
 
 (UC-D2 needs no explicit call — it happens automatically inside
 `verify-account` on the third failed attempt.)
@@ -91,3 +95,21 @@ The agent has exactly two ways to end a refresh cycle:
 These are deliberately separate: a customer who never picks up shouldn't burn
 authentication attempts, and a customer who fails 2FA on a connected call
 shouldn't get a free extra phone call out of it.
+
+## Auth model
+
+Two completely separate credentials, matching the two kinds of caller:
+
+- **Officers** (dashboard) log in with email/password against the `officers`
+  table and get a JWT (`POST /v1/auth/login`). Every dashboard-facing route
+  (`/v1/customers`, `/v1/compliance-cases`, `/v1/overview`,
+  `/v1/trigger-outbound-call`) requires `Authorization: Bearer <jwt>`.
+- **The voice platform** has no officer session, so its routes
+  (`verify-account`, `uc2-*`, `submit-kyc-screening`, `call-events`) are
+  instead protected by a static shared secret sent as a custom header
+  (`X-Tool-Secret` / `X-Webhook-Secret`) — see `api/src/middleware/auth.ts`.
+
+A FATCA/US-indicia case's SSN (UC-2.2) is AES-256-GCM encrypted before it's
+stored (`api/src/lib/crypto.ts`), with the key living only as an environment
+variable (`SSN_ENCRYPTION_KEY`) — never in the database, and the dashboard
+doesn't decrypt or display it.

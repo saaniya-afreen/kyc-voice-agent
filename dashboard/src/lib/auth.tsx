@@ -1,30 +1,18 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import type { Session } from "@supabase/supabase-js";
-import { supabase } from "./supabase";
+import { createContext, useContext, useState, type ReactNode } from "react";
+import { getStoredOfficer, getToken, type Officer } from "./api";
 
 interface AuthState {
-  session: Session | null;
+  officer: Officer | null;
   loading: boolean;
+  setOfficer: (officer: Officer | null) => void;
 }
 
-const AuthContext = createContext<AuthState>({ session: null, loading: true });
+const AuthContext = createContext<AuthState>({ officer: null, loading: false, setOfficer: () => {} });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [officer, setOfficer] = useState<Officer | null>(() => (getToken() ? getStoredOfficer() : null));
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setLoading(false);
-    });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-    });
-    return () => listener.subscription.unsubscribe();
-  }, []);
-
-  return <AuthContext.Provider value={{ session, loading }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ officer, loading: false, setOfficer }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

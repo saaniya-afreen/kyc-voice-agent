@@ -1,98 +1,44 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RiskBadge } from "@/components/ui/badge";
 import type { ComplianceCase } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-interface Kpis {
-  totalUniverse: number;
-  dueForReview: number;
-  inProgress: number;
-  autoCompleted: number;
-  pendingReview: number;
-}
-
-interface FunnelStage {
-  stage: string;
-  count: number;
-}
-
-async function count(table: string, filters: (q: any) => any): Promise<number> {
-  const { count: n } = await filters(supabase.from(table).select("*", { count: "exact", head: true }));
-  return n ?? 0;
+interface OverviewResponse {
+  kpis: {
+    totalUniverse: number;
+    dueForReview: number;
+    inProgress: number;
+    autoCompleted: number;
+    pendingReview: number;
+  };
+  funnel: { stage: string; count: number }[];
+  pending_cases: ComplianceCase[];
 }
 
 export default function Overview() {
-  const [kpis, setKpis] = useState<Kpis | null>(null);
-  const [funnel, setFunnel] = useState<FunnelStage[]>([]);
-  const [exceptions, setExceptions] = useState<ComplianceCase[]>([]);
+  const [data, setData] = useState<OverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-
-    async function load() {
-      const [
-        totalUniverse,
-        dueForReview,
-        inProgress,
-        autoCompleted,
-        pendingReview,
-        contacted,
-        authenticated,
-        completed,
-        escalated,
-        { data: exceptionRows },
-      ] = await Promise.all([
-        count("customers", (q) => q),
-        count("customers", (q) => q.eq("kyc_status", "due")),
-        count("kyc_refresh", (q) => q.eq("call_status", "calling")),
-        count("kyc_refresh", (q) => q.in("outcome_code", ["UC-1.1", "UC-1.2", "UC-1.3"])),
-        count("compliance_cases", (q) => q.eq("case_status", "pending_review")),
-        count("kyc_refresh", (q) => q.gt("contact_attempts", 0)),
-        count("kyc_refresh", (q) => q.gt("auth_attempts", 0)),
-        count("kyc_refresh", (q) => q.eq("call_status", "completed")),
-        count("kyc_refresh", (q) => q.eq("call_status", "escalated")),
-        supabase
-          .from("compliance_cases")
-          .select("*, customer:customers(*)")
-          .eq("case_status", "pending_review")
-          .order("created_at", { ascending: false })
-          .limit(5),
-      ]);
-
-      if (cancelled) return;
-
-      setKpis({ totalUniverse, dueForReview, inProgress, autoCompleted, pendingReview });
-      setFunnel([
-        { stage: "Due", count: dueForReview },
-        { stage: "Contacted", count: contacted },
-        { stage: "Authenticated", count: authenticated },
-        { stage: "Completed", count: completed },
-        { stage: "Escalated", count: escalated },
-      ]);
-      setExceptions((exceptionRows as ComplianceCase[]) ?? []);
-      setLoading(false);
-    }
-
-    load();
+    api
+      .get<OverviewResponse>("/v1/overview")
+      .then((res) => {
+        if (!cancelled) setData(res);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  if (loading || !kpis) {
+  if (loading || !data) {
     return <p className="text-sm text-muted-foreground">Loading overview…</p>;
   }
 
@@ -104,11 +50,11 @@ export default function Overview() {
       </div>
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-        <Kpi label="Total universe" value={kpis.totalUniverse} />
-        <Kpi label="Due for review" value={kpis.dueForReview} />
-        <Kpi label="In progress" value={kpis.inProgress} />
-        <Kpi label="Auto-completed (STP)" value={kpis.autoCompleted} tone="success" />
-        <Kpi label="Pending officer review" value={kpis.pendingReview} tone="warning" />
+        <Kpi label="Total universe" value={data.kpis.totalUniverse} />
+        <Kpi label="Due for review" value={data.kpis.dueForReview} />
+        <Kpi label="In progress" value={data.kpis.inProgress} />
+        <Kpi label="Auto-completed (STP)" value={data.kpis.autoCompleted} tone="success" />
+        <Kpi label="Pending officer review" value={data.kpis.pendingReview} tone="warning" />
       </div>
 
       <Card>
@@ -117,7 +63,7 @@ export default function Overview() {
         </CardHeader>
         <CardContent className="h-64">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={funnel} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+            <BarChart data={data.funnel} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
               <XAxis dataKey="stage" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} allowDecimals={false} />
@@ -139,8 +85,8 @@ export default function Overview() {
           </Link>
         </CardHeader>
         <CardContent className="flex flex-col divide-y divide-border p-0">
-          {exceptions.length === 0 && <p className="p-4 text-sm text-muted-foreground">No cases waiting on review.</p>}
-          {exceptions.map((c) => (
+          {data.pending_cases.length === 0 && <p className="p-4 text-sm text-muted-foreground">No cases waiting on review.</p>}
+          {data.pending_cases.map((c) => (
             <Link
               key={c.id}
               to={`/compliance/${c.id}`}

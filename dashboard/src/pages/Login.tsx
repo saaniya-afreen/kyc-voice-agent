@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
+import { login } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { setOfficer } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -17,14 +19,16 @@ export default function Login() {
     e.preventDefault();
     setError("");
     setLoading(true);
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
-    if (signInError) {
-      setError(signInError.message);
-      return;
+    try {
+      const officer = await login(email, password);
+      setOfficer(officer);
+      const redirectTo = (location.state as { from?: string })?.from ?? "/";
+      navigate(redirectTo, { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login failed");
+    } finally {
+      setLoading(false);
     }
-    const redirectTo = (location.state as { from?: string })?.from ?? "/";
-    navigate(redirectTo, { replace: true });
   }
 
   return (

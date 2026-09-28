@@ -16,97 +16,75 @@ project's tables and endpoints.
 ## Repo layout
 
 ```
-supabase/
-  migrations/0001_init.sql   customers, kyc_refresh, compliance_cases, customer_tins, audit_logs
-  seed.sql                   demo data covering all ten outcomes
-  functions/                 the API — one Deno edge function per endpoint
-    verify-account/               in-call 2FA
-    uc2-get-next-crs-country/     steps through declared tax residencies
-    uc2-store-tin-value/          saves a collected TIN
-    uc2-store-tin-reason/         saves an OECD TIN exception
-    submit-kyc-screening/         final classification (UC-1.x / UC-2.x) + early-exit reasons
-    call-events/                webhook: recordings, transcripts, post-call fallback classification
-    trigger-outbound-call/         dispatches an outbound call (dashboard-only)
-    _shared/                      cors, auth, audit logging, classification, crypto, voice-platform adapter
-dashboard/                   React + Tailwind compliance officer app
+api/                        Node/Express API — deploy this to Render (or any Node host)
+  src/db/schema.sql              idempotent schema: customers, kyc_refresh, compliance_cases,
+                                  customer_tins, audit_logs, officers
+  src/db/seed.sql, seed.ts       demo data covering all ten outcomes + one seeded officer login
+  src/routes/
+    tools.ts                     verify-account, uc2-get-next-crs-country, uc2-store-tin-value,
+                                  uc2-store-tin-reason, submit-kyc-screening (agent-facing)
+    webhook.ts                   call-events — recordings, transcripts, post-call fallback classification
+    calls.ts                     trigger-outbound-call (dashboard-only)
+    customers.ts, complianceCases.ts, overview.ts, auth.ts   dashboard-facing REST + officer login
+  src/lib/                       classification, audit logging, SSN encryption, voice-platform adapter
+dashboard/                  React + Tailwind compliance officer app (Render static site)
 docs/
   architecture.md            how it all fits together
   voice-agent-system-prompt.md  paste-able system prompt for the agent
   tool-definitions.json      the six custom tools, ready to register on your agent
 ```
 
-## 1. Set up Supabase
+## 1. Deploy the API + database
 
-```bash
-npm install -g supabase   # if you don't have the CLI
-supabase link --project-ref <your-project-ref>
-supabase db push          # applies supabase/migrations/0001_init.sql
-```
+The API is a plain Node/Express service — deploy it to Render, Vercel,
+Railway, or anywhere else that runs Node. Render example:
 
-Load the demo data (optional, but the dashboard is a lot more interesting
-with it):
+1. **Postgres**: create a Postgres instance (Render → New → PostgreSQL, or
+   any managed Postgres). Grab its connection string.
+2. **Web service**: point it at this repo.
+   - Build command: `npm --prefix api install && npm --prefix api run build`
+   - Start command: `npm --prefix api run start`
+   - Environment variables (see `api/.env.example`):
+     - `DATABASE_URL` — the Postgres connection string
+     - `JWT_SECRET`, `AGENT_TOOL_SECRET`, `WEBHOOK_SHARED_SECRET` — random strings (`openssl rand -hex 32`)
+     - `SSN_ENCRYPTION_KEY` — 32 random bytes, base64 (`openssl rand -base64 32`)
+     - `VOICE_PLATFORM_API_URL` / `VOICE_PLATFORM_API_KEY` / `VOICE_PLATFORM_KYC_AGENT_ID` — your voice platform's call-dispatch API
+     - `SEED_OFFICER_EMAIL` / `SEED_OFFICER_PASSWORD` — creates one compliance-officer login on first boot
 
-```bash
-psql "$(supabase status -o env | grep DB_URL | cut -d= -f2)" -f supabase/seed.sql
-# or, against a hosted project: psql "<connection string from the Supabase dashboard>" -f supabase/seed.sql
-```
-
-### Function secrets
-
-```bash
-supabase secrets set \
-  AGENT_TOOL_SECRET=$(openssl rand -hex 32) \
-  WEBHOOK_SHARED_SECRET=$(openssl rand -hex 32) \
-  SSN_ENCRYPTION_KEY=$(openssl rand -base64 32) \
-  VOICE_PLATFORM_API_URL=https://api.oneinbox.ai \
-  VOICE_PLATFORM_API_KEY=<your voice platform secret API key> \
-  VOICE_PLATFORM_KYC_AGENT_ID=<the agent id you create for this use case>
-```
-
-(`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are already available to
-every edge function automatically — you don't set those.)
-
-`VOICE_PLATFORM_API_URL`/`VOICE_PLATFORM_API_KEY`/`VOICE_PLATFORM_KYC_AGENT_ID`
-feed `supabase/functions/_shared/oneinbox.ts`, which dispatches outbound
-calls. It's written to the OneInbox convention (`POST /v1/calls`, Bearer
-API key) — if your platform's call-creation contract is different, that's
-the only file to change.
-
-### Deploy the functions
-
-```bash
-supabase functions deploy verify-account uc2-get-next-crs-country \
-  uc2-store-tin-value uc2-store-tin-reason submit-kyc-screening \
-  call-events trigger-outbound-call
-```
+The schema and demo data are applied automatically on startup (idempotent —
+safe on every deploy). No separate migration step needed.
 
 ## 2. Wire it into your voice agent
 
 1. Create the KYC refresh agent on your platform.
 2. Register the six tools from [`docs/tool-definitions.json`](docs/tool-definitions.json),
-   replacing `{{FUNCTION_BASE_URL}}` with
-   `https://<project-ref>.supabase.co/functions/v1`. Every tool needs the
-   header `X-Tool-Secret: <AGENT_TOOL_SECRET>`.
+   replacing `{{API_BASE_URL}}` with your deployed API's URL. Every tool
+   needs the header `X-Tool-Secret: <AGENT_TOOL_SECRET>`.
 3. Paste [`docs/voice-agent-system-prompt.md`](docs/voice-agent-system-prompt.md)
    into the agent's system prompt.
-4. Point the agent's webhook at
-   `https://<project-ref>.supabase.co/functions/v1/call-events` with header
+4. Point the agent's webhook at `<API_BASE_URL>/v1/call-events` with header
    `X-Webhook-Secret: <WEBHOOK_SHARED_SECRET>`.
 
-## 3. Run the dashboard
+## 3. Deploy / run the dashboard
+
+Static site (React build) — deploy anywhere that serves static files
+(Render Static Site, Vercel, Netlify, ...):
+
+- Build command: `npm --prefix dashboard install && npm --prefix dashboard run build`
+- Publish directory: `dashboard/dist`
+- Environment variable: `VITE_API_URL` = your deployed API's URL
+
+Locally:
 
 ```bash
 cd dashboard
 npm install
-cp .env.example .env   # fill in VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY
+cp .env.example .env   # fill in VITE_API_URL
 npm run dev
 ```
 
-Create an officer login in Supabase Auth (dashboard → Authentication →
-Users → Add user, or `supabase auth admin` if you're scripting it) — the
-app only supports email/password sign-in for now.
-
-Open http://localhost:5174:
+Log in with the `SEED_OFFICER_EMAIL` / `SEED_OFFICER_PASSWORD` you set on the
+API — that account is created automatically on first boot.
 
 - **Overview** — KPI cards, KYC funnel, pending-compliance preview
 - **KYC Worklist** — risk-tiered queue with attempt counters and a "Trigger
@@ -120,20 +98,15 @@ Open http://localhost:5174:
 
 ## Security notes
 
-- Every table has RLS on. The dashboard reads/writes as `authenticated`
-  (an officer's Supabase Auth session); there's no `anon` grant on anything
-  here — this data (DOBs, account numbers, transcripts) should never be
-  reachable by an unauthenticated client.
-- The five endpoints the agent calls mid-conversation run with
-  `verify_jwt = false` (the voice platform has no Supabase session) and
-  instead check a static `X-Tool-Secret` header — see
-  `supabase/functions/_shared/auth.ts`. Only `trigger-outbound-call` requires
-  a real officer JWT, since it's dashboard-only.
-- A FATCA/US-indicia case's SSN (UC-2.2) is AES-GCM encrypted before it's
-  stored (`supabase/functions/_shared/crypto.ts`), with the key living only
-  as an edge function secret — never in the database, and the dashboard
-  doesn't attempt to decrypt or display it.
-- `audit_logs` is append-only by grant (`insert`/`select` only, no
-  `update`/`delete` for `authenticated`) and uses `ON DELETE SET NULL` on its
-  foreign keys so the evidence trail survives even if a customer record is
-  later purged.
+- The five endpoints the agent calls mid-conversation
+  (`verify-account`, `uc2-*`, `submit-kyc-screening`) and the webhook
+  (`call-events`) check a static shared-secret header — see
+  `api/src/middleware/auth.ts`. `trigger-outbound-call` and every
+  dashboard-facing route instead require a real officer JWT
+  (`POST /v1/auth/login`).
+- A FATCA/US-indicia case's SSN (UC-2.2) is AES-256-GCM encrypted before it's
+  stored (`api/src/lib/crypto.ts`), with the key living only as the
+  `SSN_ENCRYPTION_KEY` environment variable — never in the database, and the
+  dashboard doesn't attempt to decrypt or display it.
+- `audit_logs` uses `ON DELETE SET NULL` on its foreign keys so the evidence
+  trail survives even if a customer record is later purged.

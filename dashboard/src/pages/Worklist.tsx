@@ -1,19 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Phone } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { api, ApiError } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TRow } from "@/components/ui/table";
 import { RiskBadge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
-import type { Customer, KycRefresh } from "@/lib/types";
+import type { Customer } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
-
-interface Row {
-  customer: Customer;
-  refresh: KycRefresh | null;
-}
 
 const DUE_WINDOWS = [
   { value: "all", label: "Any time" },
@@ -23,7 +18,7 @@ const DUE_WINDOWS = [
 ];
 
 export default function Worklist() {
-  const [rows, setRows] = useState<Row[]>([]);
+  const [rows, setRows] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [dispatching, setDispatching] = useState<string | null>(null);
   const [riskFilter, setRiskFilter] = useState("all");
@@ -32,31 +27,16 @@ export default function Worklist() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    let query = supabase.from("customers").select("*").order("next_review_date", { ascending: true });
-    if (riskFilter !== "all") query = query.eq("risk_tier", riskFilter);
-    if (statusFilter !== "all") query = query.eq("kyc_status", statusFilter);
+    const params = new URLSearchParams();
+    if (riskFilter !== "all") params.set("risk_tier", riskFilter);
+    if (statusFilter !== "all") params.set("kyc_status", statusFilter);
     if (dueWindow !== "all") {
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() + Number(dueWindow));
-      query = query.lte("next_review_date", cutoff.toISOString().split("T")[0]);
+      params.set("due_before", cutoff.toISOString().split("T")[0]);
     }
-
-    const { data: customers } = await query.limit(200);
-    const custList = (customers as Customer[]) ?? [];
-
-    let refreshByCustomer = new Map<string, KycRefresh>();
-    if (custList.length > 0) {
-      const { data: refreshes } = await supabase
-        .from("kyc_refresh")
-        .select("*")
-        .in("customer_id", custList.map((c) => c.id))
-        .order("created_at", { ascending: false });
-      for (const r of (refreshes as KycRefresh[]) ?? []) {
-        if (!refreshByCustomer.has(r.customer_id)) refreshByCustomer.set(r.customer_id, r);
-      }
-    }
-
-    setRows(custList.map((customer) => ({ customer, refresh: refreshByCustomer.get(customer.id) ?? null })));
+    const data = await api.get<Customer[]>(`/v1/customers?${params.toString()}`);
+    setRows(data);
     setLoading(false);
   }, [riskFilter, statusFilter, dueWindow]);
 
@@ -66,13 +46,14 @@ export default function Worklist() {
 
   async function triggerCall(customerId: string) {
     setDispatching(customerId);
-    const { error } = await supabase.functions.invoke("trigger-outbound-call", { body: { customer_id: customerId } });
-    setDispatching(null);
-    if (error) {
-      alert(`Could not start the call: ${error.message}`);
-      return;
+    try {
+      await api.post("/v1/trigger-outbound-call", { customer_id: customerId });
+      await load();
+    } catch (err) {
+      alert(`Could not start the call: ${err instanceof ApiError ? err.message : "unknown error"}`);
+    } finally {
+      setDispatching(null);
     }
-    await load();
   }
 
   return (
@@ -133,7 +114,8 @@ export default function Worklist() {
                 </TD>
               </TRow>
             )}
-            {rows.map(({ customer, refresh }) => {
+            {rows.map((customer) => {
+              const refresh = customer.latest_refresh;
               const attempts = refresh?.contact_attempts ?? 0;
               const maxAttempts = refresh?.max_attempts ?? 3;
               const exhausted = attempts >= maxAttempts && refresh?.call_status !== "completed";

@@ -23,6 +23,20 @@ export interface Customer {
   activity_status: "active" | "dormant";
   next_review_date: string | null;
   created_at: string;
+  latest_refresh?: {
+    id: string;
+    contact_attempts: number;
+    max_attempts: number;
+    call_status: CallStatus;
+    outcome_code: OutcomeCode;
+    created_at: string;
+  } | null;
+}
+
+export interface CustomerDetail extends Customer {
+  refreshes: KycRefresh[];
+  tins: CustomerTin[];
+  audit_logs: AuditLog[];
 }
 
 export interface KycRefresh {
@@ -57,6 +71,10 @@ export interface ComplianceCase {
   created_at: string;
   customer?: Customer;
   kyc_refresh?: KycRefresh;
+}
+
+export interface ComplianceCaseDetail extends ComplianceCase {
+  tins: CustomerTin[];
 }
 
 export interface CustomerTin {

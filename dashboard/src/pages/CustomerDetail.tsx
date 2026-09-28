@@ -1,47 +1,30 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Bot, User } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, RiskBadge, StatusBadge } from "@/components/ui/badge";
-import { OUTCOME_LABELS, type AuditLog, type Customer, type CustomerTin, type KycRefresh } from "@/lib/types";
+import { OUTCOME_LABELS, type CustomerDetail as CustomerDetailType } from "@/lib/types";
 import { cn, formatDate, formatDateTime } from "@/lib/utils";
 
 export default function CustomerDetail() {
   const { customerId } = useParams<{ customerId: string }>();
   const navigate = useNavigate();
-  const [customer, setCustomer] = useState<Customer | null>(null);
-  const [refreshes, setRefreshes] = useState<KycRefresh[]>([]);
-  const [tins, setTins] = useState<CustomerTin[]>([]);
-  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [customer, setCustomer] = useState<CustomerDetailType | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!customerId) return;
     let cancelled = false;
-
-    async function load() {
-      const [{ data: customerRow }, { data: refreshRows }, { data: logRows }] = await Promise.all([
-        supabase.from("customers").select("*").eq("id", customerId).single(),
-        supabase.from("kyc_refresh").select("*").eq("customer_id", customerId).order("created_at", { ascending: false }),
-        supabase.from("audit_logs").select("*").eq("customer_id", customerId).order("created_at", { ascending: false }),
-      ]);
-      if (cancelled) return;
-
-      const refreshList = (refreshRows as KycRefresh[]) ?? [];
-      setCustomer(customerRow as Customer);
-      setRefreshes(refreshList);
-      setLogs((logRows as AuditLog[]) ?? []);
-
-      const latestRefreshId = refreshList[0]?.id;
-      if (latestRefreshId) {
-        const { data: tinRows } = await supabase.from("customer_tins").select("*").eq("kyc_refresh_id", latestRefreshId);
-        if (!cancelled) setTins((tinRows as CustomerTin[]) ?? []);
-      }
-      setLoading(false);
-    }
-
-    load();
+    setLoading(true);
+    api
+      .get<CustomerDetailType>(`/v1/customers/${customerId}`)
+      .then((data) => {
+        if (!cancelled) setCustomer(data);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -50,6 +33,8 @@ export default function CustomerDetail() {
   if (loading || !customer) {
     return <p className="text-sm text-muted-foreground">Loading customer…</p>;
   }
+
+  const { refreshes, tins, audit_logs: logs } = customer;
 
   return (
     <div className="flex flex-col gap-4">

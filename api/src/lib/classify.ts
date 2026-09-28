@@ -1,4 +1,4 @@
-// Pure classification helpers shared by submit-kyc-screening.
+// Pure classification helpers shared by the submit-kyc-screening route.
 // See docs/architecture.md for how these map onto the platform's ten call-flow outcomes.
 
 export type RiskTier = "low" | "medium" | "high";
@@ -40,14 +40,11 @@ export function isStraightThrough(payload: ScreeningPayload): boolean {
   );
 }
 
-// Priority for which UC-2.x label describes the case when several triggers fire at once:
-// FATCA (US) > TIN exception > multi-jurisdiction CRS. Account-structure changes that fire
-// on their own (UAE-only, no US ties, no foreign residency) don't map to one of the ten
-// named flows, so outcome_code comes back null and the reason is carried in escalation_reason.
-export function classifyUc2(
-  payload: ScreeningPayload,
-  hasTinException: boolean
-): Uc2Result {
+// Priority when several triggers fire at once: FATCA (US) > TIN exception > multi-jurisdiction
+// CRS. An account-structure change firing on its own (UAE-only, no US ties, no foreign
+// residency) doesn't map to one of the ten named flows, so outcome_code comes back null and
+// the reason is carried in escalation_reason.
+export function classifyUc2(payload: ScreeningPayload, hasTinException: boolean): Uc2Result {
   const reasons: string[] = [];
   const requiredDocuments: string[] = [];
   const foreign = isForeignTaxResident(payload.tax_residencies);

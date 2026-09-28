@@ -1,20 +1,19 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, FileCheck2, ShieldAlert, UserCheck } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, RiskBadge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { OUTCOME_LABELS, type ComplianceCase, type CustomerTin } from "@/lib/types";
+import { OUTCOME_LABELS, type ComplianceCaseDetail } from "@/lib/types";
 import { formatDate, formatDateTime } from "@/lib/utils";
 
 export default function CaseDetail() {
   const { caseId } = useParams<{ caseId: string }>();
   const navigate = useNavigate();
-  const { session } = useAuth();
-  const [kase, setKase] = useState<ComplianceCase | null>(null);
-  const [tins, setTins] = useState<CustomerTin[]>([]);
+  const { officer } = useAuth();
+  const [kase, setKase] = useState<ComplianceCaseDetail | null>(null);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -22,19 +21,9 @@ export default function CaseDetail() {
   const load = useCallback(async () => {
     if (!caseId) return;
     setLoading(true);
-    const { data } = await supabase
-      .from("compliance_cases")
-      .select("*, customer:customers(*), kyc_refresh:kyc_refresh(*)")
-      .eq("id", caseId)
-      .single();
-    const c = data as ComplianceCase | null;
-    setKase(c);
-    setNotes(c?.officer_notes ?? "");
-
-    if (c?.kyc_refresh_id) {
-      const { data: tinRows } = await supabase.from("customer_tins").select("*").eq("kyc_refresh_id", c.kyc_refresh_id);
-      setTins((tinRows as CustomerTin[]) ?? []);
-    }
+    const data = await api.get<ComplianceCaseDetail>(`/v1/compliance-cases/${caseId}`);
+    setKase(data);
+    setNotes(data.officer_notes ?? "");
     setLoading(false);
   }, [caseId]);
 
@@ -43,60 +32,25 @@ export default function CaseDetail() {
   }, [load]);
 
   async function assignToMe() {
-    if (!kase || !session) return;
+    if (!kase) return;
     setSaving(true);
-    await supabase.from("compliance_cases").update({ assigned_officer_id: session.user.id }).eq("id", kase.id);
-    await supabase.from("audit_logs").insert({
-      customer_id: kase.customer_id,
-      kyc_refresh_id: kase.kyc_refresh_id,
-      event_type: "CASE_ASSIGNED",
-      actor: session.user.email ?? session.user.id,
-      new_data: { assigned_officer_id: session.user.id },
-    });
+    await api.post(`/v1/compliance-cases/${kase.id}/assign`);
     setSaving(false);
     await load();
   }
 
   async function approveAndComplete() {
-    if (!kase || !session) return;
+    if (!kase) return;
     setSaving(true);
-    const years = kase.customer?.risk_tier === "high" ? 1 : kase.customer?.risk_tier === "medium" ? 3 : 5;
-    const nextReviewDate = new Date();
-    nextReviewDate.setFullYear(nextReviewDate.getFullYear() + years);
-
-    await supabase
-      .from("compliance_cases")
-      .update({ case_status: "approved", reviewed_at: new Date().toISOString(), officer_notes: notes || kase.officer_notes })
-      .eq("id", kase.id);
-    await supabase
-      .from("customers")
-      .update({ kyc_status: "completed", next_review_date: nextReviewDate.toISOString().split("T")[0] })
-      .eq("id", kase.customer_id);
-    await supabase.from("audit_logs").insert({
-      customer_id: kase.customer_id,
-      kyc_refresh_id: kase.kyc_refresh_id,
-      event_type: "CASE_APPROVED",
-      actor: session.user.email ?? session.user.id,
-      new_data: { officer_notes: notes },
-    });
+    await api.post(`/v1/compliance-cases/${kase.id}/approve`, { officer_notes: notes });
     setSaving(false);
     await load();
   }
 
   async function requestManualOutreach() {
-    if (!kase || !session) return;
+    if (!kase) return;
     setSaving(true);
-    await supabase
-      .from("compliance_cases")
-      .update({ case_status: "in_review", officer_notes: notes || kase.officer_notes })
-      .eq("id", kase.id);
-    await supabase.from("audit_logs").insert({
-      customer_id: kase.customer_id,
-      kyc_refresh_id: kase.kyc_refresh_id,
-      event_type: "MANUAL_OUTREACH_REQUESTED",
-      actor: session.user.email ?? session.user.id,
-      new_data: { officer_notes: notes },
-    });
+    await api.post(`/v1/compliance-cases/${kase.id}/manual-outreach`, { officer_notes: notes });
     setSaving(false);
     await load();
   }
@@ -201,13 +155,13 @@ export default function CaseDetail() {
             </CardContent>
           </Card>
 
-          {tins.length > 0 && (
+          {kase.tins.length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle>Tax residencies collected</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-2">
-                {tins.map((t) => (
+                {kase.tins.map((t) => (
                   <div key={t.id} className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
                     <span className="font-medium">{t.country_code}</span>
                     {t.is_available ? (
@@ -247,7 +201,7 @@ export default function CaseDetail() {
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <p className="text-xs text-muted-foreground">
-                Assigned to: {kase.assigned_officer_id ? (kase.assigned_officer_id === session?.user.id ? "you" : kase.assigned_officer_id) : "unassigned"}
+                Assigned to: {kase.assigned_officer_id ? (kase.assigned_officer_id === officer?.id ? "you" : kase.assigned_officer_id) : "unassigned"}
               </p>
               <textarea
                 className="min-h-20 w-full rounded-md border border-border bg-card p-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"

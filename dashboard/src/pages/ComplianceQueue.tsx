@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TRow } from "@/components/ui/table";
 import { RiskBadge, StatusBadge, Badge } from "@/components/ui/badge";
@@ -15,20 +15,15 @@ export default function ComplianceQueue() {
 
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      setLoading(true);
-      let query = supabase
-        .from("compliance_cases")
-        .select("*, customer:customers(*), kyc_refresh:kyc_refresh(*)")
-        .order("created_at", { ascending: false });
-      if (statusFilter !== "all") query = query.eq("case_status", statusFilter);
-      const { data } = await query.limit(200);
-      if (!cancelled) {
-        setCases((data as ComplianceCase[]) ?? []);
-        setLoading(false);
-      }
-    }
-    load();
+    setLoading(true);
+    api
+      .get<ComplianceCase[]>(`/v1/compliance-cases?status=${statusFilter}`)
+      .then((data) => {
+        if (!cancelled) setCases(data);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => {
       cancelled = true;
     };

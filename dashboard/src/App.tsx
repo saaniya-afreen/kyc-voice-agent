@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { type ReactNode } from "react";
-import { useAuth } from "@/lib/auth";
+import { getToken } from "@/lib/api";
 import { Layout } from "@/components/Layout";
 import Login from "@/pages/Login";
 import Overview from "@/pages/Overview";
@@ -10,11 +10,8 @@ import CaseDetail from "@/pages/CaseDetail";
 import CustomerDetail from "@/pages/CustomerDetail";
 
 function RequireAuth({ children }: { children: ReactNode }) {
-  const { session, loading } = useAuth();
   const location = useLocation();
-
-  if (loading) return <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">Loading…</div>;
-  if (!session) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  if (!getToken()) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   return <>{children}</>;
 }
 
