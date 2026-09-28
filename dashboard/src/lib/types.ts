@@ -34,7 +34,7 @@ export interface KycRefresh {
   max_attempts: number;
   auth_attempts: number;
   call_status: CallStatus;
-  retell_call_id: string | null;
+  provider_call_id: string | null;
   call_recording_url: string | null;
   call_transcript: string | null;
   consent_given: boolean | null;

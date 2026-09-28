@@ -1,12 +1,12 @@
 # KYC Voice Agent
 
 Backend and compliance dashboard for an automated periodic KYC refresh and
-FATCA/CRS tax-residency program, built to plug into a voice agent you create
-on your own platform (OneInbox, Retell, Vapi, ...). This project does **not**
-build or host the voice agent — it gives that agent a set of custom tools to
-call during the conversation, a webhook to report back to, and gives
-compliance officers a dashboard to review anything the agent couldn't
-resolve on its own.
+FATCA/CRS tax-residency program, built to plug into the KYC voice agent you
+create on your own voice AI platform. This project does **not** build or
+host the voice agent — it gives that agent a set of custom tools to call
+during the conversation, a webhook to report back to, and gives compliance
+officers a dashboard to review anything the agent couldn't resolve on its
+own.
 
 See [`docs/architecture.md`](docs/architecture.md) for how the pieces fit
 together and how the ten call-flow outcomes (straight-through, dormant,
@@ -24,9 +24,9 @@ supabase/
     uc2-get-next-crs-country/     steps through declared tax residencies
     uc2-store-tin-value/          saves a collected TIN
     uc2-store-tin-reason/         saves an OECD TIN exception
-    retell-kyc-processor/         final classification (UC-1.x / UC-2.x) + early-exit reasons
-    retell-events/                webhook: recordings, transcripts, post-call fallback classification
-    retell-outbound-call/         dispatches an outbound call (dashboard-only)
+    submit-kyc-screening/         final classification (UC-1.x / UC-2.x) + early-exit reasons
+    call-events/                webhook: recordings, transcripts, post-call fallback classification
+    trigger-outbound-call/         dispatches an outbound call (dashboard-only)
     _shared/                      cors, auth, audit logging, classification, crypto, voice-platform adapter
 dashboard/                   React + Tailwind compliance officer app
 docs/
@@ -76,8 +76,8 @@ the only file to change.
 
 ```bash
 supabase functions deploy verify-account uc2-get-next-crs-country \
-  uc2-store-tin-value uc2-store-tin-reason retell-kyc-processor \
-  retell-events retell-outbound-call
+  uc2-store-tin-value uc2-store-tin-reason submit-kyc-screening \
+  call-events trigger-outbound-call
 ```
 
 ## 2. Wire it into your voice agent
@@ -90,7 +90,7 @@ supabase functions deploy verify-account uc2-get-next-crs-country \
 3. Paste [`docs/voice-agent-system-prompt.md`](docs/voice-agent-system-prompt.md)
    into the agent's system prompt.
 4. Point the agent's webhook at
-   `https://<project-ref>.supabase.co/functions/v1/retell-events` with header
+   `https://<project-ref>.supabase.co/functions/v1/call-events` with header
    `X-Webhook-Secret: <WEBHOOK_SHARED_SECRET>`.
 
 ## 3. Run the dashboard
@@ -110,7 +110,7 @@ Open http://localhost:5174:
 
 - **Overview** — KPI cards, KYC funnel, pending-compliance preview
 - **KYC Worklist** — risk-tiered queue with attempt counters and a "Trigger
-  call" action (calls `retell-outbound-call`)
+  call" action (calls `trigger-outbound-call`)
 - **Compliance Queue** — escalated cases; each opens into a case review
   screen with the recording, transcript, collected TINs, required-document
   checklist, and officer actions (assign / approve & complete / request
@@ -127,7 +127,7 @@ Open http://localhost:5174:
 - The five endpoints the agent calls mid-conversation run with
   `verify_jwt = false` (the voice platform has no Supabase session) and
   instead check a static `X-Tool-Secret` header — see
-  `supabase/functions/_shared/auth.ts`. Only `retell-outbound-call` requires
+  `supabase/functions/_shared/auth.ts`. Only `trigger-outbound-call` requires
   a real officer JWT, since it's dashboard-only.
 - A FATCA/US-indicia case's SSN (UC-2.2) is AES-GCM encrypted before it's
   stored (`supabase/functions/_shared/crypto.ts`), with the key living only

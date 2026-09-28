@@ -1,4 +1,4 @@
-// POST /retell-outbound-call
+// POST /trigger-outbound-call
 // Dispatches one outbound call for a customer's current (or a new) refresh cycle.
 // Called manually from the dashboard's "Trigger Call" button, or by whatever
 // scheduler you point at customers with next_review_date <= today.
@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: `dispatch failed: ${(err as Error).message}` }, 502);
   }
 
-  await supabase.from("kyc_refresh").update({ retell_call_id: providerCallId }).eq("id", refresh.id);
+  await supabase.from("kyc_refresh").update({ provider_call_id: providerCallId }).eq("id", refresh.id);
 
   await logAudit(supabase, {
     customer_id: customer.id,

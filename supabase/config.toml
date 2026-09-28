@@ -8,7 +8,7 @@ schemas = ["public"]
 [db]
 port = 54322
 
-# retell-outbound-call is deliberately left out of this list (defaults to verify_jwt = true):
+# trigger-outbound-call is deliberately left out of this list (defaults to verify_jwt = true):
 # it is only ever called from the dashboard with an authenticated officer's session.
 # Every other function below is called directly by the voice platform, which has no
 # Supabase session, so JWT verification is off and each checks a shared secret itself
@@ -22,7 +22,7 @@ verify_jwt = false
 verify_jwt = false
 [functions.uc2-store-tin-reason]
 verify_jwt = false
-[functions.retell-kyc-processor]
+[functions.submit-kyc-screening]
 verify_jwt = false
-[functions.retell-events]
+[functions.call-events]
 verify_jwt = false

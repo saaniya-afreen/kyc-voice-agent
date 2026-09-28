@@ -15,23 +15,23 @@ agent couldn't resolve on its own.
    uc2-get-next-crs-country               │ reads / writes
    uc2-store-tin-value                    │
    uc2-store-tin-reason                   ▼
-   retell-kyc-processor  ───────►  Postgres (customers, kyc_refresh,
+   submit-kyc-screening  ───────►  Postgres (customers, kyc_refresh,
         ▲                          compliance_cases, customer_tins,
         │ post-call webhook        audit_logs)
-   retell-events                          ▲
+   call-events                          ▲
         │                                 │ RLS (authenticated role)
- retell-outbound-call ◄── dashboard ──────┘
+ trigger-outbound-call ◄── dashboard ──────┘
    (dispatches calls)      "Trigger call" / case review / audit trail
 ```
 
 - **Edge functions** (`supabase/functions/`) are the API surface — register
   their URLs as your agent's custom tools (see `tool-definitions.json`) and as
-  its webhook target (`retell-events`). They run with the Postgres
+  its webhook target (`call-events`). They run with the Postgres
   `service_role` key and are the only thing with write access to sensitive
   fields.
 - **Dashboard** (`dashboard/`) is a Vite/React app compliance officers log
   into (Supabase Auth). It reads and writes tables directly through
-  Supabase's client SDK under RLS, and calls `retell-outbound-call` (via
+  Supabase's client SDK under RLS, and calls `trigger-outbound-call` (via
   `supabase.functions.invoke`) to dispatch calls — it never talks to your
   voice platform directly, so its API key stays server-side.
 - **`_shared/oneinbox.ts`** is the one file that knows how to ask your voice
@@ -47,23 +47,23 @@ Every refresh cycle (`kyc_refresh` row) ends in one of ten outcomes, stored as
 
 | Code | Name | What sets it | Where |
 |---|---|---|---|
-| UC-1.1 | Straight-Through | UAE-only resident, no US ties, no structure change, nothing changed | `retell-kyc-processor` |
-| UC-1.2 | Profile Update | Same as UC-1.1, but `profile_updates` differed from what's on file | `retell-kyc-processor` |
-| UC-1.3 | Dormant Account | `activity_status: "dormant"` in the screening payload | `retell-kyc-processor` |
-| UC-D1 | Consent Denied | `end_call_early` with `terminal_reason: "consent_denied"` | `retell-kyc-processor` |
+| UC-1.1 | Straight-Through | UAE-only resident, no US ties, no structure change, nothing changed | `submit-kyc-screening` |
+| UC-1.2 | Profile Update | Same as UC-1.1, but `profile_updates` differed from what's on file | `submit-kyc-screening` |
+| UC-1.3 | Dormant Account | `activity_status: "dormant"` in the screening payload | `submit-kyc-screening` |
+| UC-D1 | Consent Denied | `end_call_early` with `terminal_reason: "consent_denied"` | `submit-kyc-screening` |
 | UC-D2 | Authentication Failure | 3rd failed `verify_account` call in one cycle | `verify-account` |
-| UC-D3 | Declaration Denied | `declaration_confirmed: false`, or explicit terminal reason | `retell-kyc-processor` → `compliance_cases` |
-| UC-D4 | General Decline | `end_call_early` with `terminal_reason: "general_decline"` | `retell-kyc-processor` |
-| UC-2.1 | Multiple Tax Residencies | Foreign tax residency declared, no US indicia, no TIN exception | `retell-kyc-processor` → `compliance_cases` |
-| UC-2.2 | FATCA / US Indicia | `has_us_indicia: true` | `retell-kyc-processor` → `compliance_cases` |
-| UC-2.3 | TIN Exception | A `customer_tins` row with `is_available: false` for this cycle | `retell-kyc-processor` → `compliance_cases` |
+| UC-D3 | Declaration Denied | `declaration_confirmed: false`, or explicit terminal reason | `submit-kyc-screening` → `compliance_cases` |
+| UC-D4 | General Decline | `end_call_early` with `terminal_reason: "general_decline"` | `submit-kyc-screening` |
+| UC-2.1 | Multiple Tax Residencies | Foreign tax residency declared, no US indicia, no TIN exception | `submit-kyc-screening` → `compliance_cases` |
+| UC-2.2 | FATCA / US Indicia | `has_us_indicia: true` | `submit-kyc-screening` → `compliance_cases` |
+| UC-2.3 | TIN Exception | A `customer_tins` row with `is_available: false` for this cycle | `submit-kyc-screening` → `compliance_cases` |
 
-UC-D2 is the one outcome decided outside `retell-kyc-processor`, because it's
+UC-D2 is the one outcome decided outside `submit-kyc-screening`, because it's
 a hard 3-strikes rule enforced on every `verify-account` call, independent of
 whether the agent ever reaches the screening questions.
 
-`retell-events` (the webhook) is a safety net, not the primary path: if the
-call ends and the agent never explicitly called `retell-kyc-processor` (e.g.
+`call-events` (the webhook) is a safety net, not the primary path: if the
+call ends and the agent never explicitly called `submit-kyc-screening` (e.g.
 it hung up mid-script, or your platform's own post-call analysis extracted
 the same fields), the `call_analyzed` event runs the identical classification
 logic from the platform's extracted data. If the agent already closed the
@@ -83,7 +83,7 @@ The agent has exactly two ways to end a refresh cycle:
 
 - `contact_attempts` / `max_attempts` (default 3) on `kyc_refresh` — how many
   times this customer has been *dialed* for the current cycle.
-  `retell-outbound-call` refuses to dispatch a 4th.
+  `trigger-outbound-call` refuses to dispatch a 4th.
 - `auth_attempts` — how many times the agent tried `verify-account` *within
   one connected call*. Capped at 3, resets to 0 every time a new call is
   dispatched.

@@ -57,7 +57,7 @@ create table public.kyc_refresh (
   -- are the terminal states a call cycle can land in (see outcome_code for which of the ten flows produced it).
   call_status text not null default 'pending'
     check (call_status in ('pending', 'calling', 'completed', 'escalated', 'failed', 'refused', 'declined')),
-  retell_call_id text,
+  provider_call_id text,
   call_recording_url text,
   call_transcript text,
   consent_given boolean,
@@ -67,7 +67,7 @@ create table public.kyc_refresh (
 
 create index kyc_refresh_customer_id_idx on public.kyc_refresh (customer_id);
 create index kyc_refresh_call_status_idx on public.kyc_refresh (call_status);
-create index kyc_refresh_retell_call_id_idx on public.kyc_refresh (retell_call_id);
+create index kyc_refresh_provider_call_id_idx on public.kyc_refresh (provider_call_id);
 
 create table public.compliance_cases (
   id uuid primary key default gen_random_uuid(),

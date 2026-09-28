@@ -1,5 +1,5 @@
-// Classification core shared by the retell-kyc-processor endpoint (called explicitly
-// by the agent's submit_kyc_screening tool) and the retell-events webhook (which falls
+// Classification core shared by the submit-kyc-screening endpoint (called explicitly
+// by the agent's submit_kyc_screening tool) and the call-events webhook (which falls
 // back to this when a call ends without the agent ever reaching that tool call — e.g.
 // the platform's own post-call analysis already extracted the same fields).
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";

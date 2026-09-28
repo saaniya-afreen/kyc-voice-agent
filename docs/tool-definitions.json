@@ -1,5 +1,5 @@
 {
-  "_readme": "Custom tools for the KYC Refresh voice agent. Each `url` is one of this project's Supabase edge functions — replace {{FUNCTION_BASE_URL}} with https://<your-project-ref>.supabase.co/functions/v1 (or wherever you deploy them) when you paste these into your agent platform. Shaped for Retell's custom-function tool format (type/name/url/parameters/speak_during_execution); for Vapi, move `parameters` under a top-level `function` object — the JSON schema itself doesn't change. `kyc_refresh_id` is handed to the agent as a dynamic variable at call start (see voice-agent-system-prompt.md) — pass it through on every tool call. Every one of these endpoints requires a static header `X-Tool-Secret: <your AGENT_TOOL_SECRET>` — most platforms let you set custom headers per tool; add it to each tool's config alongside its URL.",
+  "_readme": "Custom tools for the KYC Refresh voice agent. Each `url` is one of this project's Supabase edge functions — replace {{FUNCTION_BASE_URL}} with https://<your-project-ref>.supabase.co/functions/v1 (or wherever you deploy them) when you register these as custom tools/functions on your agent. The fields here (type/name/url/parameters/speak_during_execution) follow a common custom-function tool shape — if your platform nests the JSON schema differently (e.g. under a `function` object), move `parameters` there; the schema itself doesn't change. `kyc_refresh_id` is handed to the agent as a dynamic variable at call start (see voice-agent-system-prompt.md) — pass it through on every tool call. Every one of these endpoints requires a static header `X-Tool-Secret: <your AGENT_TOOL_SECRET>` — set it as a custom header on each tool's config alongside its URL.",
   "tools": [
     {
       "type": "custom",
@@ -77,7 +77,7 @@
       "type": "custom",
       "name": "submit_kyc_screening",
       "description": "Submits the fully collected screening answers for final classification once the customer has confirmed their declaration is true and complete. Returns whether the refresh auto-completed or was escalated to the compliance team — use the response to choose your closing line.",
-      "url": "{{FUNCTION_BASE_URL}}/retell-kyc-processor",
+      "url": "{{FUNCTION_BASE_URL}}/submit-kyc-screening",
       "speak_during_execution": false,
       "speak_after_execution": true,
       "parameters": {
@@ -109,7 +109,7 @@
       "type": "custom",
       "name": "end_call_early",
       "description": "Closes out the refresh cycle for a call that is ending before reaching submit_kyc_screening: the customer declined to give consent at the start, declined to make the required declaration, or declined to proceed for some other reason. Call this immediately before hanging up.",
-      "url": "{{FUNCTION_BASE_URL}}/retell-kyc-processor",
+      "url": "{{FUNCTION_BASE_URL}}/submit-kyc-screening",
       "speak_during_execution": false,
       "speak_after_execution": false,
       "parameters": {

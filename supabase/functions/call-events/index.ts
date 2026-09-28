@@ -1,4 +1,4 @@
-// POST /retell-events
+// POST /call-events
 // Webhook receiver for call lifecycle events from the voice platform.
 // Configure this as the platform's webhook URL for the KYC agent.
 //
@@ -39,7 +39,7 @@ Deno.serve(async (req) => {
     ({ data: refresh } = await supabase
       .from("kyc_refresh")
       .select("id, customer_id, call_status, contact_attempts, max_attempts, outcome_code")
-      .eq("retell_call_id", call.call_id)
+      .eq("provider_call_id", call.call_id)
       .single());
   }
 
@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
   if (event === "call_started") {
     await supabase
       .from("kyc_refresh")
-      .update({ retell_call_id: call.call_id, call_status: "calling", last_call_at: new Date().toISOString() })
+      .update({ provider_call_id: call.call_id, call_status: "calling", last_call_at: new Date().toISOString() })
       .eq("id", refresh.id);
     return jsonResponse({ ok: true });
   }

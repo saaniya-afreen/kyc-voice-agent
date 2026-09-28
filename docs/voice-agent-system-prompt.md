@@ -3,7 +3,7 @@
 Paste this into your agent's LLM prompt configuration. It assumes the six tools in
 [`tool-definitions.json`](./tool-definitions.json) are registered on the agent, and
 that `kyc_refresh_id` plus the profile fields below arrive as dynamic variables when
-the call is dispatched (see `POST /retell-outbound-call` in the main README).
+the call is dispatched (see `POST /trigger-outbound-call` in the main README).
 
 ## Dynamic variables provided at call start
 

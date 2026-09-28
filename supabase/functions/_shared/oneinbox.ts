@@ -1,9 +1,8 @@
-// Thin adapter around the voice platform's call-dispatch API. The exact request/response
-// shape depends on which platform (OneInbox, Retell, Vapi, ...) is actually wired up —
-// this follows the OneInbox convention seen in its own dashboard client (Bearer <API key>,
-// /v1 prefix, snake_case). Adjust the body/response mapping here if your platform's
-// "create outbound call" contract differs; every other function in this project is
-// platform-agnostic and only talks to this file, not to the provider directly.
+// Thin adapter around your voice platform's call-dispatch API. Written to the OneInbox
+// convention (Bearer <API key>, /v1 prefix, snake_case). If your platform's "create
+// outbound call" request/response shape differs, this is the only file to change —
+// every other function in this project is platform-agnostic and only talks to this
+// file, never to the provider directly.
 const BASE_URL = Deno.env.get("VOICE_PLATFORM_API_URL") ?? "https://api.oneinbox.ai";
 const API_KEY = Deno.env.get("VOICE_PLATFORM_API_KEY")!;
 const AGENT_ID = Deno.env.get("VOICE_PLATFORM_KYC_AGENT_ID")!;

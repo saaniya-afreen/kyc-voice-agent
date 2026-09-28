@@ -1,4 +1,4 @@
-// Pure classification helpers shared by retell-kyc-processor.
+// Pure classification helpers shared by submit-kyc-screening.
 // See docs/architecture.md for how these map onto the platform's ten call-flow outcomes.
 
 export type RiskTier = "low" | "medium" | "high";

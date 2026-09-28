@@ -1,4 +1,4 @@
-// POST /retell-kyc-processor
+// POST /submit-kyc-screening
 // The single classification entrypoint. The agent calls it in one of two shapes:
 //
 // Early exit (consent refused / declaration refused / general decline — the

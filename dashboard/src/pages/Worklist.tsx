@@ -66,7 +66,7 @@ export default function Worklist() {
 
   async function triggerCall(customerId: string) {
     setDispatching(customerId);
-    const { error } = await supabase.functions.invoke("retell-outbound-call", { body: { customer_id: customerId } });
+    const { error } = await supabase.functions.invoke("trigger-outbound-call", { body: { customer_id: customerId } });
     setDispatching(null);
     if (error) {
       alert(`Could not start the call: ${error.message}`);
