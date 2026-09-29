@@ -114,3 +114,46 @@ export function matchesDob(inputDob: unknown, storedIsoDob: string): boolean {
   ];
   return candidates.includes(storedIsoDob);
 }
+
+// A real test call showed the agent sending account_structure as "power of attorney"
+// instead of the "poa" enum value the schema asks for — isComplexStructure() does an
+// exact match against "poa"/"trust", so that silently failed to flag a POA account as
+// complex. Map common phrasings to the canonical value; anything unrecognized passes
+// through unchanged (isComplexStructure will just treat it as not-complex, same risk
+// as before this fix, not worse).
+export function canonicalizeAccountStructure(value: unknown): string | undefined {
+  const v = coerceOptionalString(value);
+  if (!v) return v;
+  const lower = v.trim().toLowerCase();
+  if (["single", "joint", "poa", "trust"].includes(lower)) return lower;
+  if (lower.includes("power of attorney") || lower.includes("poa")) return "poa";
+  if (lower.includes("trust")) return "trust";
+  if (lower.includes("joint")) return "joint";
+  if (lower.includes("single") || lower.includes("personal") || lower.includes("individual") || lower.includes("only")) return "single";
+  return v;
+}
+
+// A real test call showed the agent sending "South Korea" instead of the ISO 3166-1
+// alpha-2 code "KR" to get_next_crs_country — and "UAE" instead of "AE" would silently
+// misclassify a UAE-only customer as a foreign tax resident (isForeignTaxResident just
+// checks !== "AE"). Map the phrasings actually observed; this is not an exhaustive
+// country list, just a safety net for the common ones.
+const COUNTRY_NAME_TO_ISO: Record<string, string> = {
+  "UAE": "AE",
+  "UNITED ARAB EMIRATES": "AE",
+  "USA": "US",
+  "UNITED STATES": "US",
+  "UNITED STATES OF AMERICA": "US",
+  "US OF A": "US",
+  "SOUTH KOREA": "KR",
+  "REPUBLIC OF KOREA": "KR",
+  "NORTH KOREA": "KP",
+  "UK": "GB",
+  "UNITED KINGDOM": "GB",
+  "GREAT BRITAIN": "GB",
+  "INDIA": "IN",
+};
+export function canonicalizeCountryCode(value: string): string {
+  const upper = value.trim().toUpperCase();
+  return COUNTRY_NAME_TO_ISO[upper] ?? upper;
+}

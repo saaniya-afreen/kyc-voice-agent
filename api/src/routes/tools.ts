@@ -5,6 +5,8 @@ import { logAudit } from "../lib/audit.js";
 import { runClassification } from "../lib/kycProcessor.js";
 import { requireToolSecret } from "../middleware/auth.js";
 import {
+  canonicalizeAccountStructure,
+  canonicalizeCountryCode,
   coerceBool,
   coerceObject,
   coerceOptionalString,
@@ -216,7 +218,7 @@ toolsRouter.post("/uc2-get-next-crs-country", async (req, res) => {
     [refresh.id]
   );
   const done = new Set(recorded.rows.map((r) => r.country_code.toUpperCase()));
-  const remaining = tax_residencies.map((c) => c.toUpperCase()).filter((c) => c !== "AE" && !done.has(c));
+  const remaining = tax_residencies.map(canonicalizeCountryCode).filter((c) => c !== "AE" && !done.has(c));
 
   res.json({
     next_country_code: remaining[0] ?? null,
@@ -229,8 +231,10 @@ toolsRouter.post("/uc2-get-next-crs-country", async (req, res) => {
 // Body: { phone_number, country_code, tin_value } -> { success }
 toolsRouter.post("/uc2-store-tin-value", async (req, res) => {
   const { country_code, tin_value } = req.body ?? {};
-  if (!country_code || !tin_value) {
-    res.status(400).json({ error: "phone_number, country_code and tin_value are required" });
+  if (!country_code || !isRealAnswer(tin_value)) {
+    res
+      .status(400)
+      .json({ error: "country_code and tin_value (the customer's actual TIN, not a yes/no answer) are required" });
     return;
   }
 
@@ -240,12 +244,13 @@ toolsRouter.post("/uc2-store-tin-value", async (req, res) => {
     return;
   }
 
+  const countryCode = canonicalizeCountryCode(String(country_code));
   await pool.query(
     `insert into kyc_customer_tins (customer_id, kyc_refresh_id, country_code, tin_value, is_available, reason_code, reason_explanation)
      values ($1, $2, $3, $4, true, null, null)
      on conflict (kyc_refresh_id, country_code)
      do update set tin_value = excluded.tin_value, is_available = true, reason_code = null, reason_explanation = null`,
-    [refresh.customer_id, refresh.id, String(country_code).toUpperCase(), tin_value]
+    [refresh.customer_id, refresh.id, countryCode, tin_value]
   );
 
   await logAudit({
@@ -253,7 +258,7 @@ toolsRouter.post("/uc2-store-tin-value", async (req, res) => {
     kyc_refresh_id: refresh.id,
     event_type: "TIN_RECORDED",
     actor: "voice_agent",
-    new_data: { country_code: String(country_code).toUpperCase() }, // never log the TIN value itself
+    new_data: { country_code: countryCode }, // never log the TIN value itself
   });
 
   res.json({ success: true });
@@ -274,12 +279,13 @@ toolsRouter.post("/uc2-store-tin-reason", async (req, res) => {
     return;
   }
 
+  const countryCode = canonicalizeCountryCode(String(country_code));
   await pool.query(
     `insert into kyc_customer_tins (customer_id, kyc_refresh_id, country_code, tin_value, is_available, reason_code, reason_explanation)
      values ($1, $2, $3, null, false, $4, $5)
      on conflict (kyc_refresh_id, country_code)
      do update set tin_value = null, is_available = false, reason_code = excluded.reason_code, reason_explanation = excluded.reason_explanation`,
-    [refresh.customer_id, refresh.id, String(country_code).toUpperCase(), reason_code, reason_explanation ?? null]
+    [refresh.customer_id, refresh.id, countryCode, reason_code, reason_explanation ?? null]
   );
 
   await logAudit({
@@ -287,7 +293,7 @@ toolsRouter.post("/uc2-store-tin-reason", async (req, res) => {
     kyc_refresh_id: refresh.id,
     event_type: "TIN_EXCEPTION_RECORDED",
     actor: "voice_agent",
-    new_data: { country_code: String(country_code).toUpperCase(), reason_code },
+    new_data: { country_code: countryCode, reason_code },
   });
 
   res.json({ success: true });
@@ -315,11 +321,11 @@ toolsRouter.post("/submit-kyc-screening", async (req, res) => {
         is_resident_uae: coerceBool(body.is_resident_uae),
         has_us_indicia: coerceBool(body.has_us_indicia),
         declaration_confirmed: coerceBool(body.declaration_confirmed),
-        tax_residencies: coerceStringArray(body.tax_residencies),
+        tax_residencies: coerceStringArray(body.tax_residencies).map(canonicalizeCountryCode),
         profile_updates: coerceObject(body.profile_updates),
         activity_status: coerceOptionalString(body.activity_status),
         ssn: coerceOptionalString(body.ssn),
-        account_structure: coerceOptionalString(body.account_structure),
+        account_structure: canonicalizeAccountStructure(body.account_structure),
       };
 
   const result = await runClassification(refresh.id, input);

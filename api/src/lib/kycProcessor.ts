@@ -71,7 +71,13 @@ export async function runClassification(kycRefreshId: string, input: Record<stri
   }>("select id, risk_tier, employer, occupation, address, phone_e164 from kyc_customers where id = $1", [refresh.customer_id]);
   if (!customer) return { status: 404, body: { error: "customer not found" } };
 
-  if (payload.activity_status === "dormant") {
+  // Dormancy only auto-completes when the underlying profile is ALSO clean — a dormant
+  // account with US indicia or a foreign tax residency still owes a FATCA/CRS filing;
+  // being unused doesn't exempt anyone from that. Checking isStraightThrough() first
+  // (rather than short-circuiting on activity_status alone) is what a real test call
+  // caught missing: a dormant, US-born customer auto-completed as UC-1.3 instead of
+  // escalating for FATCA.
+  if (payload.activity_status === "dormant" && isStraightThrough(payload)) {
     const nextReviewDate = addYears(reviewYearsForRiskTier(customer.risk_tier));
     await pool.query(
       "update kyc_customers set activity_status = 'dormant', kyc_status = 'completed', next_review_date = $2 where id = $1",
@@ -130,6 +136,12 @@ export async function runClassification(kycRefreshId: string, input: Record<stri
     [refresh.id]
   );
   const uc2 = classifyUc2(payload, tinExceptionRows.rowCount! > 0);
+  // Dormancy fell through to escalation because a FATCA/CRS/complex-structure trigger
+  // fired too — still worth the reviewing officer knowing the account is dormant.
+  const escalationReason =
+    payload.activity_status === "dormant"
+      ? `${uc2.escalation_reason || "Escalated for manual review"} | Account dormant (unused 12+ months)`
+      : uc2.escalation_reason || "Escalated for manual review";
 
   let ssnEncrypted: Buffer | null = null;
   if (payload.has_us_indicia && payload.ssn) {
@@ -139,17 +151,13 @@ export async function runClassification(kycRefreshId: string, input: Record<stri
   const caseResult = await pool.query<{ id: string }>(
     `insert into kyc_compliance_cases (customer_id, kyc_refresh_id, escalation_reason, material_change_type, required_documents, ssn_encrypted)
      values ($1, $2, $3, $4, $5, $6) returning id`,
-    [
-      customer.id,
-      refresh.id,
-      uc2.escalation_reason || "Escalated for manual review",
-      uc2.material_change_type,
-      uc2.required_documents,
-      ssnEncrypted,
-    ]
+    [customer.id, refresh.id, escalationReason, uc2.material_change_type, uc2.required_documents, ssnEncrypted]
   );
 
-  await pool.query("update kyc_customers set kyc_status = 'escalated' where id = $1", [customer.id]);
+  await pool.query(
+    `update kyc_customers set kyc_status = 'escalated'${payload.activity_status === "dormant" ? ", activity_status = 'dormant'" : ""} where id = $1`,
+    [customer.id]
+  );
   await pool.query(
     "update kyc_refresh set call_status = 'escalated', outcome_code = $2, consent_given = true where id = $1",
     [refresh.id, uc2.outcome_code]
@@ -160,7 +168,7 @@ export async function runClassification(kycRefreshId: string, input: Record<stri
     kyc_refresh_id: refresh.id,
     event_type: "KYC_ESCALATED",
     actor: "voice_agent",
-    new_data: { outcome_code: uc2.outcome_code, escalation_reason: uc2.escalation_reason },
+    new_data: { outcome_code: uc2.outcome_code, escalation_reason: escalationReason },
   });
 
   return {
