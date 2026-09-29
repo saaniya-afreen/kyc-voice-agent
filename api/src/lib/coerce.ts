@@ -20,10 +20,14 @@ export function coerceStringArray(value: unknown): string[] {
     const parsed = JSON.parse(value);
     if (Array.isArray(parsed)) return parsed.map(String);
   } catch {
-    // not JSON — fall through to comma-splitting
+    // not JSON — fall through to splitting
   }
+  // A real test call sent "United States; North Korea" — semicolon-separated, not
+  // comma. Only splitting on comma treated that whole string as one bogus "country",
+  // which broke the CRS TIN loop for the second country entirely. Split on comma,
+  // semicolon, or "and" (word-boundary) — the separators observed across calls so far.
   return value
-    .split(",")
+    .split(/,|;|\band\b/i)
     .map((s) => s.trim())
     .filter(Boolean);
 }
